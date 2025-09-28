@@ -288,78 +288,29 @@ syncGroup.MapPost("/manual", async (SyncDbContext db, SettingsService settingsSe
 
     try
     {
-        using var document = JsonDocument.Parse(responseContent);
-        var root = document.RootElement;
-
-        if (root.TryGetProperty("success", out var successElement) && successElement.GetBoolean())
+        var softOneResponse = JsonSerializer.Deserialize<LocalSoftOneApiResponse>(responseContent, new JsonSerializerOptions
         {
-            var totalCount = root.TryGetProperty("totalcount", out var totalElement) ? totalElement.GetInt32() : 0;
-            var updateDate = root.TryGetProperty("upddate", out var updateElement) ? updateElement.GetString() : "";
-            var requestId = root.TryGetProperty("reqID", out var reqElement) ? reqElement.GetString() : "";
+            PropertyNameCaseInsensitive = true
+        });
+
+        if (softOneResponse?.Success == true)
+        {
+            Console.WriteLine($"SoftOne API Success! Total Products: {softOneResponse.TotalCount}");
+            Console.WriteLine($"Update Date: {softOneResponse.UpdateDate}");
+            Console.WriteLine($"Request ID: {softOneResponse.RequestId}");
             
-            Console.WriteLine($"SoftOne API Success! Total Products: {totalCount}");
-            Console.WriteLine($"Update Date: {updateDate}");
-            Console.WriteLine($"Request ID: {requestId}");
+            // Convert to structured products
+            var products = softOneResponse.GetProducts();
+            Console.WriteLine($"Successfully parsed {products.Count} products");
             
-            if (root.TryGetProperty("fields", out var fieldsElement) && 
-                root.TryGetProperty("rows", out var rowsElement))
+            // Display first few products for debugging
+            foreach (var product in products.Take(5))
             {
-                // Extract field names
-                var fieldNames = new List<string>();
-                foreach (var field in fieldsElement.EnumerateArray())
-                {
-                    if (field.TryGetProperty("name", out var nameElement))
-                    {
-                        fieldNames.Add(nameElement.GetString() ?? "");
-                    }
-                }
-                
-                // Convert rows to structured products
-                var products = new List<Dictionary<string, string?>>();
-                foreach (var row in rowsElement.EnumerateArray())
-                {
-                    var product = new Dictionary<string, string?>();
-                    var values = row.EnumerateArray().ToList();
-                    
-                    for (int i = 0; i < fieldNames.Count && i < values.Count; i++)
-                    {
-                        var fieldName = fieldNames[i];
-                        var value = values[i].ValueKind == JsonValueKind.Null ? null : values[i].GetString();
-                        product[fieldName] = value;
-                    }
-                    
-                    products.Add(product);
-                }
-                
-                Console.WriteLine($"Successfully parsed {products.Count} products");
-                
-                // Display first few products for debugging
-                foreach (var product in products.Take(5))
-                {
-                    var name = product.GetValueOrDefault("ITEM.NAME") ?? "";
-                    var code = product.GetValueOrDefault("ITEM.CODE") ?? "";
-                    var price = product.GetValueOrDefault("ITEM.PRICER") ?? "";
-                    var stock = product.GetValueOrDefault("ITEM.MTRL_ITEMTRDATA_QTY1") ?? "";
-                    
-                    Console.WriteLine($"Product: {name} | Code: {code} | Price: €{price} | Stock: {stock}");
-                }
-                
-                // TODO: Process products for WooCommerce synchronization
-                logger.LogInformation("Retrieved {ProductCount} products from SoftOne Go API", products.Count);
-                
-                return Results.Ok(new { 
-                    success = true, 
-                    message = $"Successfully retrieved {products.Count} products",
-                    totalCount = totalCount,
-                    fieldNames = fieldNames,
-                    sampleProducts = products.Take(3).ToList()
-                });
+                Console.WriteLine($"Product: {product.Name} | Code: {product.Code} | Price: €{product.RetailPrice} | Stock: {product.StockQuantity}");
             }
-            else
-            {
-                Console.WriteLine("Missing fields or rows in SoftOne API response");
-                return Results.Problem("Missing fields or rows in SoftOne API response");
-            }
+            
+            // TODO: Process products for WooCommerce synchronization
+            logger.LogInformation("Retrieved {ProductCount} products from SoftOne Go API", products.Count);
         }
         else
         {
@@ -646,3 +597,292 @@ settingsGroup.MapGet("/test/{service}", async (string service, SettingsService s
 app.MapDefaultEndpoints();
 
 app.Run();
+public class LocalSoftOneApiResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+    
+    [JsonPropertyName("upddate")]
+    public string UpdateDate { get; set; } = string.Empty;
+    
+    [JsonPropertyName("reqID")]
+    public string RequestId { get; set; } = string.Empty;
+    
+    [JsonPropertyName("totalcount")]
+    public int TotalCount { get; set; }
+    
+    [JsonPropertyName("fields")]
+    public List<LocalSoftOneFieldDefinition> Fields { get; set; } = [];
+    
+    [JsonPropertyName("rows")]
+    public List<List<string?>> Rows { get; set; } = [];
+    
+    public List<LocalSoftOneProduct> GetProducts()
+    {
+        return Rows.Select(row => LocalSoftOneProduct.FromApiRow(row, Fields)).ToList();
+    }
+}
+
+public class LocalSoftOneFieldDefinition
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+    
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = string.Empty;
+}
+
+public class LocalSoftOneProduct
+{
+    public string ZoomInfo { get; set; } = string.Empty;
+    public string ImageData { get; set; } = string.Empty;
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public string Unit { get; set; } = string.Empty;
+    public decimal? WholesalePrice { get; set; }
+    public decimal? RetailPrice { get; set; }
+    public string Group { get; set; } = string.Empty;
+    public decimal? StockQuantity { get; set; }
+    public string Vat { get; set; } = string.Empty;
+    public decimal? Discount { get; set; }
+    public string InternalId { get; set; } = string.Empty;
+    public string Barcode { get; set; } = string.Empty;
+    public decimal? SalePrice { get; set; }
+    public decimal? PurchasePrice { get; set; }
+
+    public static LocalSoftOneProduct FromApiRow(List<string?> row, List<LocalSoftOneFieldDefinition> fields)
+    {
+        var product = new LocalSoftOneProduct();
+
+        for (int i = 0; i < fields.Count && i < row.Count; i++)
+        {
+            var fieldName = fields[i].Name;
+            var value = row[i];
+
+            switch (fieldName)
+            {
+                case "ZOOMINFO":
+                    product.ZoomInfo = value ?? string.Empty;
+                    break;
+                case "ITEM.MTRL_ITEDOCDATA_SODATA":
+                    product.ImageData = value ?? string.Empty;
+                    break;
+                case "ITEM.CODE":
+                    product.Code = value ?? string.Empty;
+                    break;
+                case "ITEM.NAME":
+                    product.Name = value ?? string.Empty;
+                    break;
+                case "ITEM.MTRCATEGORY":
+                    product.Category = value ?? string.Empty;
+                    break;
+                case "ITEM.MTRUNIT1":
+                    product.Unit = value ?? string.Empty;
+                    break;
+                case "ITEM.PRICEW":
+                    if (decimal.TryParse(value, out var wholesale))
+                        product.WholesalePrice = wholesale;
+                    break;
+                case "ITEM.PRICER":
+                    if (decimal.TryParse(value, out var retail))
+                        product.RetailPrice = retail;
+                    break;
+                case "ITEM.MTRGROUP":
+                    product.Group = value ?? string.Empty;
+                    break;
+                case "ITEM.MTRL_ITEMTRDATA_QTY1":
+                    if (decimal.TryParse(value, out var stock))
+                        product.StockQuantity = stock;
+                    break;
+                case "ITEM.VAT":
+                    product.Vat = value ?? string.Empty;
+                    break;
+                case "ITEM.SODISCOUNT":
+                    if (decimal.TryParse(value, out var discount))
+                        product.Discount = discount;
+                    break;
+                case "ITEM.MTRL":
+                    product.InternalId = value ?? string.Empty;
+                    break;
+                case "ITEM.CODE1":
+                    product.Barcode = value ?? string.Empty;
+                    break;
+                case "ITEM.MTRL_ITEMTRDATA_SALLPRICE":
+                    if (decimal.TryParse(value, out var salePrice))
+                        product.SalePrice = salePrice;
+                    break;
+                case "ITEM.MTRL_ITEMTRDATA_PURLPRICE":
+                    if (decimal.TryParse(value, out var purchasePrice))
+                        product.PurchasePrice = purchasePrice;
+                    break;
+            }
+        }
+
+        return product;
+    }
+}
+
+// Helper method for processing products during manual sync
+static async Task ProcessProductForManualSync(
+    SoftOneProduct softOneProduct,
+    int storeId,
+    IWooCommerceAtumClient wooCommerceClient,
+    SyncDbContext dbContext,
+    AppSettings settings,
+    SyncLog syncLog,
+    CancellationToken cancellationToken)
+{
+    // Determine the SKU to use for matching
+    var sku = GetProductSkuForManualSync(softOneProduct, settings);
+    if (string.IsNullOrEmpty(sku))
+    {
+        syncLog.SkippedProducts++;
+        return;
+    }
+
+    // Check if product exists in WooCommerce
+    var existingProduct = await wooCommerceClient.GetProductBySkuAsync(storeId, sku, cancellationToken);
+
+    if (existingProduct != null)
+    {
+        // Product exists - update if enabled
+        if (settings.MatchingUpdateExistingProducts)
+        {
+            await UpdateExistingProductForManualSync(existingProduct, softOneProduct, storeId, wooCommerceClient, dbContext, settings, cancellationToken);
+            syncLog.UpdatedProducts++;
+        }
+        else
+        {
+            syncLog.SkippedProducts++;
+        }
+    }
+    else
+    {
+        // Product doesn't exist - create if enabled
+        if (settings.MatchingCreateMissingProducts)
+        {
+            await CreateNewProductForManualSync(softOneProduct, storeId, wooCommerceClient, dbContext, settings, cancellationToken);
+            syncLog.CreatedProducts++;
+        }
+        else
+        {
+            syncLog.SkippedProducts++;
+        }
+    }
+}
+
+static string GetProductSkuForManualSync(SoftOneProduct softOneProduct, AppSettings settings)
+{
+    // Use primary field first, then fallback to secondary
+    var primaryValue = GetFieldValueForManualSync(softOneProduct, settings.MatchingPrimaryField);
+    if (!string.IsNullOrEmpty(primaryValue))
+        return primaryValue;
+
+    var secondaryValue = GetFieldValueForManualSync(softOneProduct, settings.MatchingSecondaryField);
+    return secondaryValue ?? string.Empty;
+}
+
+static string? GetFieldValueForManualSync(SoftOneProduct product, string fieldName)
+{
+    return fieldName.ToLower() switch
+    {
+        "sku" or "code" => product.Code,
+        "barcode" => product.Barcode,
+        "name" => product.Name,
+        _ => null
+    };
+}
+
+static async Task CreateNewProductForManualSync(
+    SoftOneProduct softOneProduct,
+    int storeId,
+    IWooCommerceAtumClient wooCommerceClient,
+    SyncDbContext dbContext,
+    AppSettings settings,
+    CancellationToken cancellationToken)
+{
+    var sku = GetProductSkuForManualSync(softOneProduct, settings);
+
+    var createRequest = new CreateWooCommerceProductRequest
+    {
+        Name = softOneProduct.Name,
+        Sku = sku,
+        RegularPrice = softOneProduct.RetailPrice ?? 0,
+        Description = $"Imported from SoftOne Go - Code: {softOneProduct.Code}",
+        StockQuantity = (int)(softOneProduct.StockQuantity ?? 0),
+        ManageStock = true
+    };
+
+    var createdProduct = await wooCommerceClient.CreateProductAsync(storeId, createRequest, cancellationToken);
+
+    // Update ATUM inventory if location is configured
+    if (settings.AtumLocationId > 0)
+    {
+        var inventoryRequest = new UpdateAtumInventoryRequest
+        {
+            Quantity = (int)(softOneProduct.StockQuantity ?? 0),
+            Location = settings.AtumLocationName
+        };
+        await wooCommerceClient.UpdateAtumInventoryAsync(storeId, createdProduct.Id, inventoryRequest, cancellationToken);
+    }
+
+    // Save to local database
+    var product = new Product
+    {
+        SoftOneId = softOneProduct.Code,
+        WooCommerceId = createdProduct.Id.ToString(),
+        AtumId = createdProduct.Id.ToString(),
+        Name = createdProduct.Name,
+        Sku = createdProduct.Sku,
+        Price = createdProduct.RegularPrice,
+        Quantity = createdProduct.StockQuantity,
+        LastSyncedAt = DateTime.UtcNow,
+        LastSyncStatus = "Created"
+    };
+
+    dbContext.Products.Add(product);
+}
+
+static async Task UpdateExistingProductForManualSync(
+    WooCommerceProduct existingProduct,
+    SoftOneProduct softOneProduct,
+    int storeId,
+    IWooCommerceAtumClient wooCommerceClient,
+    SyncDbContext dbContext,
+    AppSettings settings,
+    CancellationToken cancellationToken)
+{
+    var updateRequest = new UpdateWooCommerceProductRequest
+    {
+        Name = softOneProduct.Name,
+        RegularPrice = softOneProduct.RetailPrice ?? existingProduct.RegularPrice,
+        StockQuantity = (int)(softOneProduct.StockQuantity ?? existingProduct.StockQuantity)
+    };
+
+    var updatedProduct = await wooCommerceClient.UpdateProductAsync(storeId, existingProduct.Id, updateRequest, cancellationToken);
+
+    // Update ATUM inventory if location is configured
+    if (settings.AtumLocationId > 0)
+    {
+        var inventoryRequest = new UpdateAtumInventoryRequest
+        {
+            Quantity = (int)(softOneProduct.StockQuantity ?? 0),
+            Location = settings.AtumLocationName
+        };
+        await wooCommerceClient.UpdateAtumInventoryAsync(storeId, updatedProduct.Id, inventoryRequest, cancellationToken);
+    }
+
+    // Update local database
+    var product = await dbContext.Products
+        .FirstOrDefaultAsync(p => p.WooCommerceId == updatedProduct.Id.ToString(), cancellationToken);
+
+    if (product != null)
+    {
+        product.Name = updatedProduct.Name;
+        product.Price = updatedProduct.RegularPrice;
+        product.Quantity = updatedProduct.StockQuantity;
+        product.LastSyncedAt = DateTime.UtcNow;
+        product.LastSyncStatus = "Updated";
+    }
+}

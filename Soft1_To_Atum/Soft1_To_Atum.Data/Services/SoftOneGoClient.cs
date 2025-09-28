@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Soft1_To_Atum.Data.Models;
 
 namespace Soft1_To_Atum.Data.Services;
 

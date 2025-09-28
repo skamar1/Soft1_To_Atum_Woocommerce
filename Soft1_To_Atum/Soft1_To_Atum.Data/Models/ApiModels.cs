@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Soft1_To_Atum.Data.Models;
 
 // Response models για τα API endpoints
@@ -150,4 +152,159 @@ public class FieldMappingSettings
     public string Category { get; set; } = "ITEM.MTRCATEGORY";
     public string Unit { get; set; } = "ITEM.MTRUNIT1";
     public string Vat { get; set; } = "ITEM.VAT";
+}
+
+// SoftOne API Models
+public class SoftOneApiResponse
+{
+    /// <summary>
+    /// Indicates if the API call was successful
+    /// </summary>
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+    
+    /// <summary>
+    /// Update timestamp from SoftOne API in format "YYYYMMDD HH:mm:ss"
+    /// </summary>
+    [JsonPropertyName("upddate")]
+    public string UpdateDate { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Request ID from SoftOne API
+    /// </summary>
+    [JsonPropertyName("reqID")]
+    public string RequestId { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Total number of records returned
+    /// </summary>
+    [JsonPropertyName("totalcount")]
+    public int TotalCount { get; set; }
+    
+    /// <summary>
+    /// Field definitions describing the structure of each row
+    /// </summary>
+    [JsonPropertyName("fields")]
+    public List<SoftOneFieldDefinition> Fields { get; set; } = [];
+    
+    /// <summary>
+    /// Data rows - each row corresponds to one product with values matching the Fields order
+    /// </summary>
+    [JsonPropertyName("rows")]
+    public List<List<string?>> Rows { get; set; } = [];
+    
+    /// <summary>
+    /// Converts the raw API response to a list of structured SoftOneProduct objects
+    /// </summary>
+    public List<SoftOneProduct> GetProducts()
+    {
+        return Rows.Select(row => SoftOneProduct.FromApiRow(row, Fields)).ToList();
+    }
+}
+
+public class SoftOneFieldDefinition
+{
+    /// <summary>
+    /// Field name (e.g., "ITEM.CODE", "ITEM.NAME", etc.)
+    /// </summary>
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Field data type (e.g., "string", "float", "image")
+    /// </summary>
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = string.Empty;
+}
+
+public class SoftOneProduct
+{
+    public string ZoomInfo { get; set; } = string.Empty;
+    public string ImageData { get; set; } = string.Empty;
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public string Unit { get; set; } = string.Empty;
+    public decimal? WholesalePrice { get; set; }
+    public decimal? RetailPrice { get; set; }
+    public string Group { get; set; } = string.Empty;
+    public decimal? StockQuantity { get; set; }
+    public string Vat { get; set; } = string.Empty;
+    public decimal? Discount { get; set; }
+    public string InternalId { get; set; } = string.Empty;
+    public string Barcode { get; set; } = string.Empty;
+    public decimal? SalePrice { get; set; }
+    public decimal? PurchasePrice { get; set; }
+
+    // Factory method to create from raw SoftOne API row data
+    public static SoftOneProduct FromApiRow(List<string?> row, List<SoftOneFieldDefinition> fields)
+    {
+        var product = new SoftOneProduct();
+
+        for (int i = 0; i < fields.Count && i < row.Count; i++)
+        {
+            var fieldName = fields[i].Name;
+            var value = row[i];
+
+            switch (fieldName)
+            {
+                case "ZOOMINFO":
+                    product.ZoomInfo = value ?? string.Empty;
+                    break;
+                case "ITEM.MTRL_ITEDOCDATA_SODATA":
+                    product.ImageData = value ?? string.Empty;
+                    break;
+                case "ITEM.CODE":
+                    product.Code = value ?? string.Empty;
+                    break;
+                case "ITEM.NAME":
+                    product.Name = value ?? string.Empty;
+                    break;
+                case "ITEM.MTRCATEGORY":
+                    product.Category = value ?? string.Empty;
+                    break;
+                case "ITEM.MTRUNIT1":
+                    product.Unit = value ?? string.Empty;
+                    break;
+                case "ITEM.PRICEW":
+                    if (decimal.TryParse(value, out var wholesale))
+                        product.WholesalePrice = wholesale;
+                    break;
+                case "ITEM.PRICER":
+                    if (decimal.TryParse(value, out var retail))
+                        product.RetailPrice = retail;
+                    break;
+                case "ITEM.MTRGROUP":
+                    product.Group = value ?? string.Empty;
+                    break;
+                case "ITEM.MTRL_ITEMTRDATA_QTY1":
+                    if (decimal.TryParse(value, out var stock))
+                        product.StockQuantity = stock;
+                    break;
+                case "ITEM.VAT":
+                    product.Vat = value ?? string.Empty;
+                    break;
+                case "ITEM.SODISCOUNT":
+                    if (decimal.TryParse(value, out var discount))
+                        product.Discount = discount;
+                    break;
+                case "ITEM.MTRL":
+                    product.InternalId = value ?? string.Empty;
+                    break;
+                case "ITEM.CODE1":
+                    product.Barcode = value ?? string.Empty;
+                    break;
+                case "ITEM.MTRL_ITEMTRDATA_SALLPRICE":
+                    if (decimal.TryParse(value, out var salePrice))
+                        product.SalePrice = salePrice;
+                    break;
+                case "ITEM.MTRL_ITEMTRDATA_PURLPRICE":
+                    if (decimal.TryParse(value, out var purchasePrice))
+                        product.PurchasePrice = purchasePrice;
+                    break;
+            }
+        }
+
+        return product;
+    }
 }

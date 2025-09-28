@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "2x7XXhFYubg=",
+  "dgSpecHash": "VyLuDVqUF/8=",
   "success": true,
   "projectFilePath": "/Users/arisskamagakis/1Projects/Soft1_To_Atum_Woocommerce/Soft1_To_Atum/Soft1_To_Atum.ApiService/Soft1_To_Atum.ApiService.csproj",
   "expectedPackageFiles": [
@@ -91,6 +91,7 @@
     "/Users/arisskamagakis/.nuget/packages/system.memory/4.5.3/system.memory.4.5.3.nupkg.sha512",
     "/Users/arisskamagakis/.nuget/packages/system.reflection.metadata/7.0.0/system.reflection.metadata.7.0.0.nupkg.sha512",
     "/Users/arisskamagakis/.nuget/packages/system.runtime.compilerservices.unsafe/6.0.0/system.runtime.compilerservices.unsafe.6.0.0.nupkg.sha512",
+    "/Users/arisskamagakis/.nuget/packages/system.text.encoding.codepages/9.0.0/system.text.encoding.codepages.9.0.0.nupkg.sha512",
     "/Users/arisskamagakis/.nuget/packages/system.text.json/9.0.0/system.text.json.9.0.0.nupkg.sha512",
     "/Users/arisskamagakis/.nuget/packages/system.threading.channels/7.0.0/system.threading.channels.7.0.0.nupkg.sha512",
     "/Users/arisskamagakis/.nuget/packages/system.threading.ratelimiting/8.0.0/system.threading.ratelimiting.8.0.0.nupkg.sha512"

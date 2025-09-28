@@ -12,7 +12,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Soft1_To_Atum.ApiService\Soft1_To_Atum.ApiService.csproj" />
-    <ProjectReference Include="..\Soft1_To_Atum.Web\Soft1_To_Atum.Web.csproj" />
     <ProjectReference Include="..\Soft1_To_Atum.Worker\Soft1_To_Atum.Worker.csproj" />
     <ProjectReference Include="..\Soft1_To_Atum.Blazor\Soft1_To_Atum.Blazor.csproj" />
   </ItemGroup>

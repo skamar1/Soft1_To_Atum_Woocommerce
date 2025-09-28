@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Soft1_To_Atum.ApiService")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+64a9aebea9baf791fd530621bc755063638555a6")]
 [assembly: System.Reflection.AssemblyProductAttribute("Soft1_To_Atum.ApiService")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Soft1_To_Atum.ApiService")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

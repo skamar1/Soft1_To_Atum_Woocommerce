@@ -173,6 +173,7 @@
 /Users/arisskamagakis/1Projects/Soft1_To_Atum_Woocommerce/Soft1_To_Atum/Soft1_To_Atum.ApiService/obj/Debug/net9.0/Soft1_To_Atum.ApiService.csproj.CoreCompileInputs.cache
 /Users/arisskamagakis/1Projects/Soft1_To_Atum_Woocommerce/Soft1_To_Atum/Soft1_To_Atum.ApiService/obj/Debug/net9.0/Soft1_To_Atum.ApiService.MvcApplicationPartsAssemblyInfo.cs
 /Users/arisskamagakis/1Projects/Soft1_To_Atum_Woocommerce/Soft1_To_Atum/Soft1_To_Atum.ApiService/obj/Debug/net9.0/Soft1_To_Atum.ApiService.MvcApplicationPartsAssemblyInfo.cache
+/Users/arisskamagakis/1Projects/Soft1_To_Atum_Woocommerce/Soft1_To_Atum/Soft1_To_Atum.ApiService/obj/Debug/net9.0/Soft1_To_Atum.ApiService.sourcelink.json
 /Users/arisskamagakis/1Projects/Soft1_To_Atum_Woocommerce/Soft1_To_Atum/Soft1_To_Atum.ApiService/obj/Debug/net9.0/scopedcss/bundle/Soft1_To_Atum.ApiService.styles.css
 /Users/arisskamagakis/1Projects/Soft1_To_Atum_Woocommerce/Soft1_To_Atum/Soft1_To_Atum.ApiService/obj/Debug/net9.0/staticwebassets.build.json
 /Users/arisskamagakis/1Projects/Soft1_To_Atum_Woocommerce/Soft1_To_Atum/Soft1_To_Atum.ApiService/obj/Debug/net9.0/staticwebassets.build.json.cache

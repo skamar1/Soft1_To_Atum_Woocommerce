@@ -59,4 +59,118 @@ public class AppSettings
     // Timestamps
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public void UpdateFromApiModel(ApiSettingsModel apiModel)
+    {
+        StoreName = apiModel.Name;
+        StoreEnabled = apiModel.Enabled;
+
+        // SoftOne Go Settings
+        SoftOneGoBaseUrl = apiModel.SoftOneGo.BaseUrl;
+        SoftOneGoAppId = apiModel.SoftOneGo.AppId;
+        SoftOneGoToken = apiModel.SoftOneGo.Token;
+        SoftOneGoS1Code = apiModel.SoftOneGo.S1Code;
+        SoftOneGoFilters = apiModel.SoftOneGo.Filters;
+
+        // WooCommerce Settings
+        WooCommerceUrl = apiModel.WooCommerce.Url;
+        WooCommerceConsumerKey = apiModel.WooCommerce.ConsumerKey;
+        WooCommerceConsumerSecret = apiModel.WooCommerce.ConsumerSecret;
+        WooCommerceVersion = apiModel.WooCommerce.Version;
+
+        // ATUM Settings
+        AtumLocationId = apiModel.ATUM.LocationId;
+        AtumLocationName = apiModel.ATUM.LocationName;
+
+        // Email Settings
+        EmailSmtpHost = apiModel.Email.SmtpHost;
+        EmailSmtpPort = apiModel.Email.SmtpPort;
+        EmailUsername = apiModel.Email.Username;
+        EmailPassword = apiModel.Email.Password;
+        EmailFromEmail = apiModel.Email.FromEmail;
+        EmailToEmail = apiModel.Email.ToEmail;
+
+        // Sync Settings
+        SyncIntervalMinutes = apiModel.Sync.IntervalMinutes;
+        SyncAutoSync = apiModel.Sync.AutoSync;
+        SyncEmailNotifications = apiModel.Sync.EmailNotifications;
+
+        // Matching Settings
+        MatchingPrimaryField = apiModel.Matching.PrimaryField;
+        MatchingSecondaryField = apiModel.Matching.SecondaryField;
+        MatchingCreateMissingProducts = apiModel.Matching.CreateMissingProducts;
+        MatchingUpdateExistingProducts = apiModel.Matching.UpdateExistingProducts;
+
+        // Field Mapping Settings
+        FieldMappingSku = apiModel.FieldMapping.Sku;
+        FieldMappingName = apiModel.FieldMapping.Name;
+        FieldMappingPrice = apiModel.FieldMapping.Price;
+        FieldMappingStockQuantity = apiModel.FieldMapping.StockQuantity;
+        FieldMappingCategory = apiModel.FieldMapping.Category;
+        FieldMappingUnit = apiModel.FieldMapping.Unit;
+        FieldMappingVat = apiModel.FieldMapping.Vat;
+
+        UpdatedAt = DateTime.UtcNow;
+    }
+
+    public ApiSettingsModel ToApiModel()
+    {
+        return new ApiSettingsModel
+        {
+            Name = StoreName,
+            Enabled = StoreEnabled,
+            SoftOneGo = new SoftOneGoSettings
+            {
+                BaseUrl = SoftOneGoBaseUrl,
+                AppId = SoftOneGoAppId,
+                Token = SoftOneGoToken,
+                S1Code = SoftOneGoS1Code,
+                Filters = SoftOneGoFilters
+            },
+            WooCommerce = new WooCommerceSettings
+            {
+                Url = WooCommerceUrl,
+                ConsumerKey = WooCommerceConsumerKey,
+                ConsumerSecret = WooCommerceConsumerSecret,
+                Version = WooCommerceVersion
+            },
+            ATUM = new AtumSettings
+            {
+                LocationId = AtumLocationId,
+                LocationName = AtumLocationName
+            },
+            Email = new EmailSettings
+            {
+                SmtpHost = EmailSmtpHost,
+                SmtpPort = EmailSmtpPort,
+                Username = EmailUsername,
+                Password = EmailPassword,
+                FromEmail = EmailFromEmail,
+                ToEmail = EmailToEmail
+            },
+            Sync = new SyncSettings
+            {
+                IntervalMinutes = SyncIntervalMinutes,
+                AutoSync = SyncAutoSync,
+                EmailNotifications = SyncEmailNotifications
+            },
+            Matching = new MatchingSettings
+            {
+                PrimaryField = MatchingPrimaryField,
+                SecondaryField = MatchingSecondaryField,
+                CreateMissingProducts = MatchingCreateMissingProducts,
+                UpdateExistingProducts = MatchingUpdateExistingProducts
+            },
+            FieldMapping = new FieldMappingSettings
+            {
+                Sku = FieldMappingSku,
+                Name = FieldMappingName,
+                Price = FieldMappingPrice,
+                StockQuantity = FieldMappingStockQuantity,
+                Category = FieldMappingCategory,
+                Unit = FieldMappingUnit,
+                Vat = FieldMappingVat
+            }
+        };
+    }
 }
