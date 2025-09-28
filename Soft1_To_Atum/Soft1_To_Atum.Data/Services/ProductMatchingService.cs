@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Soft1_To_Atum.Data.Models;
+using System.Globalization;
 
 namespace Soft1_To_Atum.Data.Services;
 
@@ -141,24 +142,24 @@ public class ProductMatchingService
         product.Group = softOneProduct.GetValueOrDefault("ITEM.MTRGROUP") ?? "";
         product.Vat = softOneProduct.GetValueOrDefault("ITEM.VAT") ?? "";
 
-        // Pricing - handle decimal parsing safely
-        if (decimal.TryParse(softOneProduct.GetValueOrDefault("ITEM.PRICER"), out var retailPrice))
+        // Pricing - handle decimal parsing safely (SoftOne API returns numbers with period separator)
+        if (decimal.TryParse(softOneProduct.GetValueOrDefault("ITEM.PRICER"), NumberStyles.Number, CultureInfo.InvariantCulture, out var retailPrice))
             product.Price = retailPrice;
 
-        if (decimal.TryParse(softOneProduct.GetValueOrDefault("ITEM.PRICEW"), out var wholesalePrice))
+        if (decimal.TryParse(softOneProduct.GetValueOrDefault("ITEM.PRICEW"), NumberStyles.Number, CultureInfo.InvariantCulture, out var wholesalePrice))
             product.WholesalePrice = wholesalePrice;
 
-        if (decimal.TryParse(softOneProduct.GetValueOrDefault("ITEM.MTRL_ITEMTRDATA_SALLPRICE"), out var salePrice))
+        if (decimal.TryParse(softOneProduct.GetValueOrDefault("ITEM.MTRL_ITEMTRDATA_SALLPRICE"), NumberStyles.Number, CultureInfo.InvariantCulture, out var salePrice))
             product.SalePrice = salePrice;
 
-        if (decimal.TryParse(softOneProduct.GetValueOrDefault("ITEM.MTRL_ITEMTRDATA_PURLPRICE"), out var purchasePrice))
+        if (decimal.TryParse(softOneProduct.GetValueOrDefault("ITEM.MTRL_ITEMTRDATA_PURLPRICE"), NumberStyles.Number, CultureInfo.InvariantCulture, out var purchasePrice))
             product.PurchasePrice = purchasePrice;
 
-        if (decimal.TryParse(softOneProduct.GetValueOrDefault("ITEM.SODISCOUNT"), out var discount))
+        if (decimal.TryParse(softOneProduct.GetValueOrDefault("ITEM.SODISCOUNT"), NumberStyles.Number, CultureInfo.InvariantCulture, out var discount))
             product.Discount = discount;
 
         // Inventory
-        if (decimal.TryParse(softOneProduct.GetValueOrDefault("ITEM.MTRL_ITEMTRDATA_QTY1"), out var quantity))
+        if (decimal.TryParse(softOneProduct.GetValueOrDefault("ITEM.MTRL_ITEMTRDATA_QTY1"), NumberStyles.Number, CultureInfo.InvariantCulture, out var quantity))
             product.Quantity = quantity;
 
         // Additional data
@@ -182,6 +183,7 @@ public class ProductMatchingService
         MapSoftOneDataToProduct(softOneProduct, product);
         return product;
     }
+
 }
 
 /// <summary>

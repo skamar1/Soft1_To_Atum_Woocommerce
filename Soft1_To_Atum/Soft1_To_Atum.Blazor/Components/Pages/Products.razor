@@ -135,14 +135,14 @@
                 <TemplateColumn Title="Actions" Sortable="false">
                     <CellTemplate>
                         <MudButtonGroup Variant="Variant.Text" Size="Size.Small">
-                            <MudIconButton Icon="Icons.Material.Filled.Info"
+                            <MudIconButton Icon="@Icons.Material.Filled.Info"
                                           Color="Color.Primary"
                                           Size="Size.Small"
                                           OnClick="() => ViewProduct(context.Item)" />
-                            <MudIconButton Icon="Icons.Material.Filled.Edit"
+                            @* <MudIconButton Icon="@Icons.Material.Filled.Edit"
                                           Color="Color.Secondary"
                                           Size="Size.Small"
-                                          OnClick="() => EditProduct(context.Item)" />
+                                          OnClick="() => EditProduct(context.Item)" /> *@
                         </MudButtonGroup>
                     </CellTemplate>
                 </TemplateColumn>

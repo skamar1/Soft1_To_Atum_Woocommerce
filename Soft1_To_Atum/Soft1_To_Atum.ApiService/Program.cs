@@ -302,7 +302,11 @@ syncGroup.MapPost("/manual", async (SyncDbContext db, SettingsService settingsSe
     //deserialize to api model for easier handling
     var apiSettings = settings.ToApiModel();
 
-   // logger.LogDebug($"Retrieved settings from database Store name {apiSettings.name}");
+    if (string.IsNullOrEmpty(apiSettings.SoftOneGo.Token))
+    {
+        logger.LogError("SoftOne Go token is not configured");
+        return Results.Problem("SoftOne Go is not configured go to settings to configure the service.");
+    }
 
     var client = new HttpClient();
     var request = new HttpRequestMessage(HttpMethod.Post, $"{apiSettings.SoftOneGo.BaseUrl}/list/item");

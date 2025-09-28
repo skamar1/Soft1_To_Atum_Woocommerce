@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using System.Globalization;
 
 namespace Soft1_To_Atum.Data.Models;
 
@@ -296,25 +297,25 @@ public class SoftOneProduct
                     product.Unit = value ?? string.Empty;
                     break;
                 case "ITEM.PRICEW":
-                    if (decimal.TryParse(value, out var wholesale))
+                    if (decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var wholesale))
                         product.WholesalePrice = wholesale;
                     break;
                 case "ITEM.PRICER":
-                    if (decimal.TryParse(value, out var retail))
+                    if (decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var retail))
                         product.RetailPrice = retail;
                     break;
                 case "ITEM.MTRGROUP":
                     product.Group = value ?? string.Empty;
                     break;
                 case "ITEM.MTRL_ITEMTRDATA_QTY1":
-                    if (decimal.TryParse(value, out var stock))
+                    if (decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var stock))
                         product.StockQuantity = stock;
                     break;
                 case "ITEM.VAT":
                     product.Vat = value ?? string.Empty;
                     break;
                 case "ITEM.SODISCOUNT":
-                    if (decimal.TryParse(value, out var discount))
+                    if (decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var discount))
                         product.Discount = discount;
                     break;
                 case "ITEM.MTRL":
@@ -324,11 +325,11 @@ public class SoftOneProduct
                     product.Barcode = value ?? string.Empty;
                     break;
                 case "ITEM.MTRL_ITEMTRDATA_SALLPRICE":
-                    if (decimal.TryParse(value, out var salePrice))
+                    if (decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var salePrice))
                         product.SalePrice = salePrice;
                     break;
                 case "ITEM.MTRL_ITEMTRDATA_PURLPRICE":
-                    if (decimal.TryParse(value, out var purchasePrice))
+                    if (decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var purchasePrice))
                         product.PurchasePrice = purchasePrice;
                     break;
             }
@@ -336,4 +337,5 @@ public class SoftOneProduct
 
         return product;
     }
+
 }
