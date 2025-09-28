@@ -1,0 +1,46 @@
+# Environment files
+.env
+.env.local
+.env.production
+
+# Logs
+logs/*.log
+logs/*.txt
+*.log
+
+# Lock files
+*.lock
+
+# Temporary files
+tmp/
+temp/
+cache/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Vendor directories (if using Composer)
+vendor/
+
+# Configuration overrides
+config/local.php
+
+# Backup files
+*.bak
+*.backup
+
+# Error dumps
+error_log
+php_errors.log
+
+# Test files
+test_output/
+coverage/

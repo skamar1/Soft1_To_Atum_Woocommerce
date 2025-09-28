@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chmod:*)",
+      "Bash(git init:*)",
+      "Bash(dotnet new:*)",
+      "Bash(dotnet sln add:*)",
+      "Bash(dotnet build)",
+      "Bash(dotnet ef migrations:*)",
+      "Bash(dotnet run:*)",
+      "Bash(lsof:*)",
+      "Bash(xargs kill:*)",
+      "Bash(curl:*)",
+      "Bash(pkill:*)",
+      "Bash(dotnet add:*)",
+      "Bash(dotnet user-secrets:*)",
+      "Bash(dotnet clean:*)",
+      "Bash(dotnet build:*)",
+      "Bash(open \"https://localhost:17232/login?t=5b8479567b9755efbc0964c62bf8fd80\")",
+      "Bash(sqlite3:*)"
+    ]
+  }
+}

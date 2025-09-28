@@ -1,0 +1,602 @@
+@page "/settings"
+@rendermode InteractiveServer
+@inject SyncApiClient SyncApi
+@inject ISnackbar Snackbar
+@inject ILogger<Settings> Logger
+@using Soft1_To_Atum.Data.Models
+
+<PageTitle>Settings - SoftOne to ATUM Sync</PageTitle>
+
+<MudText Typo="Typo.h3" Class="mb-4">Settings</MudText>
+<MudText Typo="Typo.body1" Class="mb-6" Color="Color.Secondary">
+    Configure synchronization settings and API credentials for SoftOne Go, WooCommerce and ATUM
+</MudText>
+
+@if (settings == null)
+{
+    <div class="d-flex justify-center align-center" style="height: 200px;">
+        <MudProgressCircular Indeterminate="true" Size="Size.Large" Color="Color.Primary" />
+        <MudText Typo="Typo.h6" Class="ml-4">Loading settings...</MudText>
+    </div>
+}
+else
+{
+    <MudGrid>
+        <!-- Store Information -->
+        <MudItem xs="12">
+            <MudPaper Class="pa-6 mb-4">
+                <MudText Typo="Typo.h5" Class="mb-4">
+                    <MudIcon Icon="@Icons.Material.Filled.Store" Class="mr-2" />
+                    Store Information
+                </MudText>
+                <MudGrid>
+                    <MudItem xs="12" md="8">
+                        <MudTextField @bind-Value="settings.Name"
+                                    Label="Store Name"
+                                    Variant="Variant.Outlined"
+                                    HelperText="Display name for this store" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudSwitch @bind-Value="settings.Enabled"
+                                 Label="Store Enabled"
+                                 Color="Color.Primary" />
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        </MudItem>
+
+        <!-- SoftOne Go Settings -->
+        <MudItem xs="12">
+            <MudPaper Class="pa-6 mb-4">
+                <MudText Typo="Typo.h5" Class="mb-4">
+                    <MudIcon Icon="@Icons.Material.Filled.Business" Class="mr-2" />
+                    SoftOne Go Settings
+                </MudText>
+                <MudGrid>
+                    <MudItem xs="12" md="6">
+                        <MudTextField @bind-Value="settings.SoftOneGo.BaseUrl"
+                                    Label="Base URL"
+                                    Variant="Variant.Outlined"
+                                    HelperText="SoftOne Go API base URL" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField @bind-Value="settings.SoftOneGo.AppId"
+                                    Label="App ID"
+                                    Variant="Variant.Outlined"
+                                    HelperText="Application ID in SoftOne Go" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField @bind-Value="settings.SoftOneGo.S1Code"
+                                    Label="S1 Code"
+                                    Variant="Variant.Outlined"
+                                    HelperText="Company code in SoftOne" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField @bind-Value="settings.SoftOneGo.Token"
+                                    Label="Token"
+                                    InputType="InputType.Password"
+                                    Variant="Variant.Outlined"
+                                    HelperText="Authentication token" />
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudTextField @bind-Value="settings.SoftOneGo.Filters"
+                                    Label="Filters"
+                                    Variant="Variant.Outlined"
+                                    Lines="2"
+                                    HelperText="Query filters for product data (e.g., quantity ranges)" />
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudButton StartIcon="@Icons.Material.Filled.CheckCircle"
+                                 Color="Color.Secondary"
+                                 Variant="Variant.Outlined"
+                                 OnClick="@(() => TestConnection("softone"))"
+                                 Disabled="isTestingConnection">
+                            @if (isTestingConnection && testingService == "softone")
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+                                <span class="ml-2">Testing...</span>
+                            }
+                            else
+                            {
+                                <span>Test Connection</span>
+                            }
+                        </MudButton>
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        </MudItem>
+
+        <!-- WooCommerce Settings -->
+        <MudItem xs="12">
+            <MudPaper Class="pa-6 mb-4">
+                <MudText Typo="Typo.h5" Class="mb-4">
+                    <MudIcon Icon="@Icons.Material.Filled.ShoppingCart" Class="mr-2" />
+                    WooCommerce Settings
+                </MudText>
+                <MudGrid>
+                    <MudItem xs="12">
+                        <MudTextField @bind-Value="settings.WooCommerce.Url"
+                                    Label="Store URL"
+                                    Placeholder="https://your-store.com"
+                                    Variant="Variant.Outlined"
+                                    HelperText="Your WooCommerce store URL" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudTextField @bind-Value="settings.WooCommerce.Version"
+                                    Label="API Version"
+                                    Variant="Variant.Outlined"
+                                    HelperText="WooCommerce API version" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudTextField @bind-Value="settings.WooCommerce.ConsumerKey"
+                                    Label="Consumer Key"
+                                    InputType="InputType.Password"
+                                    Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudTextField @bind-Value="settings.WooCommerce.ConsumerSecret"
+                                    Label="Consumer Secret"
+                                    InputType="InputType.Password"
+                                    Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudButton StartIcon="@Icons.Material.Filled.CheckCircle"
+                                 Color="Color.Secondary"
+                                 Variant="Variant.Outlined"
+                                 OnClick="@(() => TestConnection("woocommerce"))"
+                                 Disabled="isTestingConnection">
+                            @if (isTestingConnection && testingService == "woocommerce")
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+                                <span class="ml-2">Testing...</span>
+                            }
+                            else
+                            {
+                                <span>Test Connection</span>
+                            }
+                        </MudButton>
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        </MudItem>
+
+        <!-- ATUM Settings -->
+        <MudItem xs="12">
+            <MudPaper Class="pa-6 mb-4">
+                <MudText Typo="Typo.h5" Class="mb-4">
+                    <MudIcon Icon="@Icons.Material.Filled.Inventory" Class="mr-2" />
+                    ATUM Multi Inventory Settings
+                </MudText>
+                <MudGrid>
+                    <MudItem xs="12" md="6">
+                        <MudNumericField @bind-Value="settings.ATUM.LocationId"
+                                       Label="Location ID"
+                                       Variant="Variant.Outlined"
+                                       HelperText="ATUM inventory location ID" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField @bind-Value="settings.ATUM.LocationName"
+                                    Label="Location Name"
+                                    Variant="Variant.Outlined"
+                                    HelperText="ATUM location identifier" />
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        </MudItem>
+
+        <!-- Product Matching Settings -->
+        <MudItem xs="12">
+            <MudPaper Class="pa-6 mb-4">
+                <MudText Typo="Typo.h5" Class="mb-4">
+                    <MudIcon Icon="@Icons.Material.Filled.LinkOff" Class="mr-2" />
+                    Product Matching Settings
+                </MudText>
+                <MudGrid>
+                    <MudItem xs="12" md="6">
+                        <MudSelect @bind-Value="settings.Matching.PrimaryField"
+                                 Label="Primary Matching Field"
+                                 Variant="Variant.Outlined"
+                                 HelperText="Primary field to match products">
+                            <MudSelectItem Value="@("sku")">SKU</MudSelectItem>
+                            <MudSelectItem Value="@("barcode")">Barcode</MudSelectItem>
+                            <MudSelectItem Value="@("code")">Code</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudSelect @bind-Value="settings.Matching.SecondaryField"
+                                 Label="Secondary Matching Field"
+                                 Variant="Variant.Outlined"
+                                 HelperText="Fallback field to match products">
+                            <MudSelectItem Value="@("sku")">SKU</MudSelectItem>
+                            <MudSelectItem Value="@("barcode")">Barcode</MudSelectItem>
+                            <MudSelectItem Value="@("code")">Code</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudSwitch @bind-Value="settings.Matching.CreateMissingProducts"
+                                 Label="Create Missing Products"
+                                 Color="Color.Primary" />
+                        <MudText Typo="Typo.caption" Class="ml-4">Create products that don't exist in WooCommerce</MudText>
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudSwitch @bind-Value="settings.Matching.UpdateExistingProducts"
+                                 Label="Update Existing Products"
+                                 Color="Color.Primary" />
+                        <MudText Typo="Typo.caption" Class="ml-4">Update products that already exist in WooCommerce</MudText>
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        </MudItem>
+
+        <!-- Field Mapping Settings -->
+        <MudItem xs="12">
+            <MudPaper Class="pa-6 mb-4">
+                <MudText Typo="Typo.h5" Class="mb-4">
+                    <MudIcon Icon="@Icons.Material.Filled.Transform" Class="mr-2" />
+                    Field Mapping (SoftOne Go → WooCommerce)
+                </MudText>
+                <MudGrid>
+                    <MudItem xs="12" md="6">
+                        <MudTextField @bind-Value="settings.FieldMapping.Sku"
+                                    Label="SKU Field"
+                                    Variant="Variant.Outlined"
+                                    HelperText="SoftOne field for product SKU" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField @bind-Value="settings.FieldMapping.Name"
+                                    Label="Name Field"
+                                    Variant="Variant.Outlined"
+                                    HelperText="SoftOne field for product name" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField @bind-Value="settings.FieldMapping.Price"
+                                    Label="Price Field"
+                                    Variant="Variant.Outlined"
+                                    HelperText="SoftOne field for product price" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField @bind-Value="settings.FieldMapping.StockQuantity"
+                                    Label="Stock Quantity Field"
+                                    Variant="Variant.Outlined"
+                                    HelperText="SoftOne field for stock quantity" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField @bind-Value="settings.FieldMapping.Category"
+                                    Label="Category Field"
+                                    Variant="Variant.Outlined"
+                                    HelperText="SoftOne field for product category" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField @bind-Value="settings.FieldMapping.Unit"
+                                    Label="Unit Field"
+                                    Variant="Variant.Outlined"
+                                    HelperText="SoftOne field for product unit" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField @bind-Value="settings.FieldMapping.Vat"
+                                    Label="VAT Field"
+                                    Variant="Variant.Outlined"
+                                    HelperText="SoftOne field for VAT rate" />
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        </MudItem>
+
+        <!-- Sync Settings -->
+        <MudItem xs="12">
+            <MudPaper Class="pa-6 mb-4">
+                <MudText Typo="Typo.h5" Class="mb-4">
+                    <MudIcon Icon="@Icons.Material.Filled.Sync" Class="mr-2" />
+                    Sync Settings
+                </MudText>
+                <MudGrid>
+                    <MudItem xs="12" md="4">
+                        <MudNumericField @bind-Value="settings.Sync.IntervalMinutes"
+                                       Label="Sync Interval (minutes)"
+                                       Variant="Variant.Outlined"
+                                       Min="1"
+                                       Max="1440"
+                                       HelperText="How often to sync automatically" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudSwitch @bind-Value="settings.Sync.AutoSync"
+                                 Label="Auto Sync Enabled"
+                                 Color="Color.Primary" />
+                    </MudItem>
+                    <MudItem xs="12" md="4">
+                        <MudSwitch @bind-Value="settings.Sync.EmailNotifications"
+                                 Label="Email Notifications"
+                                 Color="Color.Primary" />
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        </MudItem>
+
+        <!-- Email Settings -->
+        <MudItem xs="12">
+            <MudPaper Class="pa-6 mb-4">
+                <MudText Typo="Typo.h5" Class="mb-4">
+                    <MudIcon Icon="@Icons.Material.Filled.Email" Class="mr-2" />
+                    Email Settings
+                </MudText>
+                <MudGrid>
+                    <MudItem xs="12" md="6">
+                        <MudTextField @bind-Value="settings.Email.SmtpHost"
+                                    Label="SMTP Host"
+                                    Placeholder="smtp.gmail.com"
+                                    Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudNumericField @bind-Value="settings.Email.SmtpPort"
+                                       Label="SMTP Port"
+                                       Variant="Variant.Outlined"
+                                       Min="1"
+                                       Max="65535" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField @bind-Value="settings.Email.Username"
+                                    Label="Username"
+                                    Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField @bind-Value="settings.Email.Password"
+                                    Label="Password"
+                                    InputType="InputType.Password"
+                                    Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField @bind-Value="settings.Email.FromEmail"
+                                    Label="From Email"
+                                    Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12" md="6">
+                        <MudTextField @bind-Value="settings.Email.ToEmail"
+                                    Label="To Email"
+                                    Variant="Variant.Outlined" />
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        </MudItem>
+
+        <!-- Action Buttons -->
+        <MudItem xs="12">
+            <MudStack Row="true" Spacing="3" Justify="Justify.FlexEnd">
+                <MudButton StartIcon="@Icons.Material.Filled.BugReport"
+                         Color="Color.Info"
+                         Variant="Variant.Text"
+                         OnClick="@(async () => await TestApiConnection())"
+                         Size="Size.Small">
+                    Test API
+                </MudButton>
+                <MudButton StartIcon="@Icons.Material.Filled.Refresh"
+                         Color="Color.Secondary"
+                         Variant="Variant.Outlined"
+                         OnClick="@(async () => await LoadSettings())"
+                         Disabled="isSaving">
+                    Reset
+                </MudButton>
+                <MudButton StartIcon="@Icons.Material.Filled.Save"
+                         Color="Color.Primary"
+                         Variant="Variant.Filled"
+                         OnClick="@(async () => await SaveSettings())"
+                         Disabled="isSaving">
+                    @if (isSaving)
+                    {
+                        <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+                        <span class="ml-2">Saving...</span>
+                    }
+                    else
+                    {
+                        <span>Save Settings</span>
+                    }
+                </MudButton>
+            </MudStack>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    private ApiSettingsModel? settings;
+    private bool isSaving = false;
+    private bool isTestingConnection = false;
+    private string testingService = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Logger.LogInformation("Settings page OnInitializedAsync called");
+
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            Logger.LogInformation("Settings page first render completed");
+            Console.WriteLine("Settings page first render completed");
+            await LoadSettings();
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadSettings()
+    {
+        Console.WriteLine("=== LOAD SETTINGS INITIATED ===");
+        Logger.LogInformation("=== LOAD SETTINGS INITIATED ===");
+        var maxRetries = 3;
+        var delay = TimeSpan.FromSeconds(2);
+
+        for (int retry = 0; retry < maxRetries; retry++)
+        {
+            try
+            {
+                Console.WriteLine("Loading settings...");
+                Logger.LogDebug("Loading settings (attempt {Attempt}/{MaxRetries})", retry + 1, maxRetries);
+                
+                settings = await SyncApi.GetSettingsAsync();
+                if (settings == null)
+                {
+                    settings = new ApiSettingsModel();
+                }
+                
+                Logger.LogDebug("Settings loaded successfully");
+                Console.WriteLine("Settings loaded successfully");
+                return; // Success, exit the retry loop
+            }
+            catch (HttpRequestException ex) when (retry < maxRetries - 1)
+            {
+                Logger.LogWarning("Settings load attempt {Attempt} failed: {Message}. Retrying in {Delay}ms...", 
+                    retry + 1, ex.Message, delay.TotalMilliseconds);
+                    Console.WriteLine($"Settings load attempt {retry + 1} failed: {ex.Message}. Retrying in {delay.TotalMilliseconds}ms...");
+                
+                await Task.Delay(delay);
+                delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * 2, 10)); // Exponential backoff, max 10s
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error loading settings on attempt {Attempt}: {Message}", retry + 1, ex.Message);
+                Console.WriteLine($"Error loading settings on attempt {retry + 1}: {ex.Message}");
+                
+                if (retry == maxRetries - 1) // Last attempt failed
+                {
+                    Snackbar.Add($"Error loading settings: {ex.Message}", Severity.Error);
+                    Console.WriteLine($"Error loading settings: {ex.Message}");
+                    settings = new ApiSettingsModel();
+                }
+            }
+        }
+    }
+
+    private async Task SaveSettings()
+    {
+        Logger.LogInformation("=== SAVE SETTINGS BUTTON CLICKED ===");
+        
+        if (settings == null) 
+        {
+            Logger.LogWarning("SaveSettings called but settings is null");
+            Snackbar.Add("Settings not loaded. Please refresh the page.", Severity.Warning);
+            return;
+        }
+
+        Logger.LogInformation("Starting to save settings for store: {StoreName}", settings.Name);
+        isSaving = true;
+        StateHasChanged(); // Force UI update
+        
+        try
+        {
+            var success = await SyncApi.UpdateSettingsAsync(settings);
+            Logger.LogInformation("UpdateSettingsAsync returned: {Success}", success);
+            
+            if (success)
+            {
+                Snackbar.Add("Settings saved successfully!", Severity.Success);
+                Logger.LogInformation("Settings saved successfully");
+            }
+            else
+            {
+                Snackbar.Add("Failed to save settings", Severity.Error);
+                Logger.LogWarning("UpdateSettingsAsync returned false");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error saving settings: {Message}", ex.Message);
+            Snackbar.Add($"Error saving settings: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            isSaving = false;
+            StateHasChanged(); // Force UI update
+            Logger.LogInformation("=== SAVE SETTINGS COMPLETED ===");
+        }
+    }
+
+    private async Task TestConnection(string service)
+    {
+        // Debug snackbar για να δούμε αν το κουμπί δουλεύει
+        Snackbar.Add($"Button clicked for {service}!", Severity.Info);
+
+        Logger.LogInformation("=== SETTINGS PAGE TEST CONNECTION START ===");
+        Logger.LogInformation("User clicked Test Connection button for service: {Service}", service);
+
+        if (settings == null)
+        {
+            Logger.LogWarning("TestConnection called but settings is null");
+            Snackbar.Add("Settings not loaded. Please refresh the page.", Severity.Warning);
+            return;
+        }
+
+        isTestingConnection = true;
+        testingService = service;
+        StateHasChanged(); // Force UI update
+
+        try
+        {
+            Logger.LogInformation("Calling SyncApi.TestConnectionAsync for service: {Service}", service);
+            var result = await SyncApi.TestConnectionAsync(service);
+
+            if (result == null)
+            {
+                Logger.LogWarning("TestConnectionAsync returned null for service: {Service}", service);
+                Snackbar.Add($"No response from {service} test", Severity.Error);
+                return;
+            }
+
+            Logger.LogInformation("TestConnectionAsync returned: Success={Success}, Message={Message} for service: {Service}",
+                result.Success, result.Message, service);
+
+            // Use the actual message from the API response
+            var severity = result.Success ? Severity.Success : Severity.Error;
+
+            Logger.LogInformation("Showing snackbar message: {Message} with severity: {Severity}", result.Message, severity);
+            Snackbar.Add(result.Message, severity);
+        }
+        catch (HttpRequestException ex)
+        {
+            Logger.LogError(ex, "HTTP error during TestConnection for service: {Service}. Message: {Message}", service, ex.Message);
+            var errorMessage = $"Connection error testing {service}: Unable to reach API service";
+            Snackbar.Add(errorMessage, Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Exception during TestConnection for service: {Service}. Message: {Message}", service, ex.Message);
+            var errorMessage = $"Error testing {service} connection: {ex.Message}";
+            Logger.LogInformation("Showing error snackbar: {ErrorMessage}", errorMessage);
+            Snackbar.Add(errorMessage, Severity.Error);
+        }
+        finally
+        {
+            Logger.LogInformation("TestConnection finally block - setting isTestingConnection to false");
+            isTestingConnection = false;
+            testingService = string.Empty;
+            StateHasChanged(); // Force UI update
+            Logger.LogInformation("=== SETTINGS PAGE TEST CONNECTION END ===");
+        }
+    }
+
+    private async Task TestApiConnection()
+    {
+        try
+        {
+            Logger.LogInformation("Testing basic API connectivity...");
+            Snackbar.Add("Testing API connection...", Severity.Info);
+            
+            // Simple test by calling the health endpoint
+            var response = await SyncApi.GetSettingsAsync();
+            if (response != null)
+            {
+                Logger.LogInformation("API test successful - settings retrieved");
+                Snackbar.Add("API connection successful!", Severity.Success);
+            }
+            else
+            {
+                Logger.LogWarning("API test failed - no settings returned");
+                Snackbar.Add("API connection failed - no data returned", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "API test failed: {Message}", ex.Message);
+            Snackbar.Add($"API connection error: {ex.Message}", Severity.Error);
+        }
+    }
+}

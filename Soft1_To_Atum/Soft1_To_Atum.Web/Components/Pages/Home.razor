@@ -1,0 +1,257 @@
+@page "/"
+@rendermode InteractiveServer
+@inject SyncApiClient SyncApi
+@inject ILogger<Home> Logger
+@inject ISnackbar Snackbar
+@using Soft1_To_Atum.Data.Models
+
+<PageTitle>Dashboard - SoftOne to ATUM Sync</PageTitle>
+
+<MudText Typo="Typo.h3" Class="mb-4">Sync Dashboard</MudText>
+<MudText Typo="Typo.body1" Class="mb-6" Color="Color.Secondary">
+    Real-time monitoring of product synchronization between SoftOne Go and WooCommerce ATUM
+</MudText>
+
+@if (syncStatus == null)
+{
+    <MudGrid>
+        <MudItem xs="12">
+            <MudCard>
+                <MudCardContent>
+                    <div class="d-flex justify-center align-center" style="height: 200px;">
+                        <MudProgressCircular Indeterminate="true" Size="Size.Large" Color="Color.Primary" />
+                        <MudText Typo="Typo.h6" Class="ml-4">Loading sync status...</MudText>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+    </MudGrid>
+}
+else
+{
+    <MudGrid>
+        <!-- Status Card -->
+        <MudItem xs="12" sm="6" md="3">
+            <MudCard Elevation="4">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@Icons.Material.Filled.Sync" Color="@GetStatusColor()" Size="Size.Large" Class="mr-4" />
+                        <div>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">STATUS</MudText>
+                            <MudText Typo="Typo.h6">@GetStatusText()</MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        <!-- Total Products Card -->
+        <MudItem xs="12" sm="6" md="3">
+            <MudCard Elevation="4">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@Icons.Material.Filled.Inventory" Color="Color.Success" Size="Size.Large" Class="mr-4" />
+                        <div>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">TOTAL PRODUCTS</MudText>
+                            <MudText Typo="Typo.h6">@syncStatus.TotalProducts.ToString("N0")</MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        <!-- Last Sync Card -->
+        <MudItem xs="12" sm="6" md="3">
+            <MudCard Elevation="4">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@Icons.Material.Filled.Schedule" Color="Color.Info" Size="Size.Large" Class="mr-4" />
+                        <div>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">LAST SYNC</MudText>
+                            <MudText Typo="Typo.h6">
+                                @(syncStatus.LastSyncAt?.ToString("dd/MM/yyyy HH:mm") ?? "Never")
+                            </MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        <!-- Duration Card -->
+        <MudItem xs="12" sm="6" md="3">
+            <MudCard Elevation="4">
+                <MudCardContent>
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@Icons.Material.Filled.Timer" Color="Color.Warning" Size="Size.Large" Class="mr-4" />
+                        <div>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">DURATION</MudText>
+                            <MudText Typo="Typo.h6">@(syncStatus.LastSyncDuration ?? "N/A")</MudText>
+                        </div>
+                    </div>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        <!-- Manual Sync Action Card -->
+        <MudItem xs="12">
+            <MudCard Elevation="4">
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">Manual Synchronization</MudText>
+                    </CardHeaderContent>
+                    <CardHeaderActions>
+                        <MudButton StartIcon="@Icons.Material.Filled.Sync"
+                                   Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   Size="Size.Large"
+                                   OnClick="StartManualSync"
+                                   Disabled="@isManualSyncRunning">
+                            @if (isManualSyncRunning)
+                            {
+                                <MudProgressCircular Class="mr-2" Size="Size.Small" Indeterminate="true" />
+                                <span>Syncing...</span>
+                            }
+                            else
+                            {
+                                <span>Start Manual Sync</span>
+                            }
+                        </MudButton>
+                    </CardHeaderActions>
+                </MudCardHeader>
+                <MudCardContent>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">
+                        Manually trigger a synchronization process between SoftOne Go and WooCommerce ATUM.
+                        This will update all product information and inventory levels.
+                    </MudText>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        <!-- Last Sync Statistics -->
+        @if (syncStatus.LastSyncStats != null)
+        {
+            <MudItem xs="12">
+                <MudCard Elevation="4">
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">Last Sync Statistics</MudText>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        <MudGrid>
+                            <MudItem xs="6" sm="4" md="2">
+                                <div class="text-center">
+                                    <MudText Typo="Typo.h4" Color="Color.Primary">@syncStatus.LastSyncStats.Total</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">TOTAL</MudText>
+                                </div>
+                            </MudItem>
+                            <MudItem xs="6" sm="4" md="2">
+                                <div class="text-center">
+                                    <MudText Typo="Typo.h4" Color="Color.Success">@syncStatus.LastSyncStats.Created</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">CREATED</MudText>
+                                </div>
+                            </MudItem>
+                            <MudItem xs="6" sm="4" md="2">
+                                <div class="text-center">
+                                    <MudText Typo="Typo.h4" Color="Color.Info">@syncStatus.LastSyncStats.Updated</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">UPDATED</MudText>
+                                </div>
+                            </MudItem>
+                            <MudItem xs="6" sm="4" md="2">
+                                <div class="text-center">
+                                    <MudText Typo="Typo.h4" Color="Color.Secondary">@syncStatus.LastSyncStats.Skipped</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">SKIPPED</MudText>
+                                </div>
+                            </MudItem>
+                            <MudItem xs="6" sm="4" md="2">
+                                <div class="text-center">
+                                    <MudText Typo="Typo.h4" Color="Color.Error">@syncStatus.LastSyncStats.Errors</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">ERRORS</MudText>
+                                </div>
+                            </MudItem>
+                        </MudGrid>
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+        }
+    </MudGrid>
+}
+
+@code {
+    private SyncStatusResponse? syncStatus;
+    private bool isManualSyncRunning = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Logger.LogDebug("Home component initializing...");
+        await LoadSyncStatus();
+        Logger.LogDebug("Home component initialized");
+    }
+
+    private async Task LoadSyncStatus()
+    {
+        try
+        {
+            Logger.LogDebug("Loading sync status...");
+            syncStatus = await SyncApi.GetSyncStatusAsync();
+            Logger.LogDebug("Sync status loaded successfully");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading sync status: {Message}", ex.Message);
+            Snackbar.Add("Error loading sync status", Severity.Error);
+        }
+    }
+
+    private async Task StartManualSync()
+    {
+        try
+        {
+            Logger.LogInformation("Manual sync button clicked");
+            isManualSyncRunning = true;
+            Snackbar.Add("Starting manual sync...", Severity.Info);
+
+            Logger.LogDebug("Calling SyncApi.StartManualSyncAsync()");
+            var result = await SyncApi.StartManualSyncAsync();
+            Logger.LogInformation("Manual sync API call completed. Result: {SyncLogId}", result?.SyncLogId);
+
+            Snackbar.Add($"Sync started successfully! Sync ID: {result?.SyncLogId}", Severity.Success);
+
+            // Wait a bit and refresh the status
+            Logger.LogDebug("Waiting 3 seconds before refreshing status");
+            await Task.Delay(3000);
+            await LoadSyncStatus();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error starting manual sync: {Message}", ex.Message);
+            Snackbar.Add($"Error starting sync: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            Logger.LogDebug("Manual sync operation completed, setting isManualSyncRunning to false");
+            isManualSyncRunning = false;
+        }
+    }
+
+    private Color GetStatusColor()
+    {
+        if (syncStatus?.IsRunning == true || isManualSyncRunning)
+            return Color.Success;
+
+        return syncStatus?.LastSyncStatus switch
+        {
+            "Completed" => Color.Primary,
+            "Failed" => Color.Error,
+            _ => Color.Secondary
+        };
+    }
+
+    private string GetStatusText()
+    {
+        if (syncStatus?.IsRunning == true || isManualSyncRunning)
+            return "Running";
+
+        return syncStatus?.LastSyncStatus ?? "Ready";
+    }
+}
