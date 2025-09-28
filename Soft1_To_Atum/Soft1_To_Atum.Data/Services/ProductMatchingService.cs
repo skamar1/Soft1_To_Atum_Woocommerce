@@ -184,6 +184,131 @@ public class ProductMatchingService
         return product;
     }
 
+    /// <summary>
+    /// Processes an ATUM inventory item using the 2-level matching strategy:
+    /// 1. Match by ATUM ID - highest priority
+    /// 2. Match by SKU - fallback
+    /// 3. Create new if no match found
+    /// </summary>
+    public async Task<ProductMatchResult> ProcessAtumProductAsync(
+        AtumInventoryItem atumItem,
+        CancellationToken cancellationToken = default)
+    {
+        var atumId = atumItem.Id.ToString();
+        var sku = atumItem.GetSku();
+
+        _logger.LogDebug("Processing ATUM product: AtumId={AtumId}, SKU={SKU}, Quantity={Quantity}",
+            atumId, sku, atumItem.GetStockQuantity());
+
+        Product? existingProduct = null;
+        string matchType = "";
+
+        // Step 1: Try to match by ATUM ID - highest priority
+        if (!string.IsNullOrEmpty(atumId))
+        {
+            existingProduct = await _context.Products
+                .FirstOrDefaultAsync(p => p.AtumId == atumId, cancellationToken);
+
+            if (existingProduct != null)
+            {
+                matchType = "AtumId";
+                _logger.LogDebug("Found existing product by ATUM ID: {ProductId}", existingProduct.Id);
+            }
+        }
+
+        // Step 2: Try to match by SKU - fallback
+        if (existingProduct == null && !string.IsNullOrEmpty(sku))
+        {
+            existingProduct = await _context.Products
+                .FirstOrDefaultAsync(p => p.Sku == sku, cancellationToken);
+
+            if (existingProduct != null)
+            {
+                matchType = "SKU";
+                _logger.LogDebug("Found existing product by SKU: {ProductId}", existingProduct.Id);
+            }
+        }
+
+        // Step 3: Update existing or create new
+        if (existingProduct != null)
+        {
+            // Update existing product with ATUM data
+            MapAtumDataToProduct(atumItem, existingProduct);
+            existingProduct.LastSyncedAt = DateTime.UtcNow;
+            existingProduct.LastSyncStatus = "Updated";
+            existingProduct.UpdatedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Updated existing product {ProductId} with ATUM data via {MatchType} match",
+                existingProduct.Id, matchType);
+
+            return new ProductMatchResult
+            {
+                Product = existingProduct,
+                Action = ProductAction.Updated,
+                MatchType = matchType,
+                Success = true
+            };
+        }
+        else
+        {
+            // Create new product from ATUM data
+            var newProduct = CreateProductFromAtum(atumItem);
+
+            _context.Products.Add(newProduct);
+            await _context.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Created new product {ProductId} from ATUM data", newProduct.Id);
+
+            return new ProductMatchResult
+            {
+                Product = newProduct,
+                Action = ProductAction.Created,
+                MatchType = "None",
+                Success = true
+            };
+        }
+    }
+
+    /// <summary>
+    /// Maps ATUM inventory data to an existing Product entity
+    /// </summary>
+    private void MapAtumDataToProduct(AtumInventoryItem atumItem, Product product)
+    {
+        // Update ATUM specific fields
+        product.AtumId = atumItem.Id.ToString();
+        product.AtumQuantity = atumItem.GetStockQuantity();
+
+        // Update basic fields if not already set or if ATUM has newer data
+        if (string.IsNullOrEmpty(product.Name) && !string.IsNullOrEmpty(atumItem.Name))
+            product.Name = atumItem.Name;
+
+        if (string.IsNullOrEmpty(product.Sku) && !string.IsNullOrEmpty(atumItem.GetSku()))
+            product.Sku = atumItem.GetSku();
+    }
+
+    /// <summary>
+    /// Creates a new Product entity from ATUM data
+    /// </summary>
+    private Product CreateProductFromAtum(AtumInventoryItem atumItem)
+    {
+        var product = new Product
+        {
+            AtumId = atumItem.Id.ToString(),
+            Sku = atumItem.GetSku(),
+            Name = atumItem.Name,
+            AtumQuantity = atumItem.GetStockQuantity(),
+            Quantity = 0, // SoftOne quantity starts at 0
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            LastSyncedAt = DateTime.UtcNow,
+            LastSyncStatus = "Created"
+        };
+
+        return product;
+    }
+
 }
 
 /// <summary>

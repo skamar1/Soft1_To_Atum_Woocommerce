@@ -97,18 +97,27 @@
                     </CellTemplate>
                 </PropertyColumn>
 
-                <PropertyColumn Property="x => x.Quantity" Title="Stock" Format="F0">
+                <PropertyColumn Property="x => x.Quantity" Title="SoftOne Stock" Format="F0">
                     <CellTemplate>
-                        <MudChip T="string" Size="Size.Small"
+                        <MudChip Size="Size.Small"
                                 Color="@(context.Item.Quantity > 0 ? Color.Success : Color.Warning)">
                             @context.Item.Quantity.ToString("F0")
                         </MudChip>
                     </CellTemplate>
                 </PropertyColumn>
 
+                <PropertyColumn Property="x => x.AtumQuantity" Title="ATUM Stock" Format="F0">
+                    <CellTemplate>
+                        <MudChip Size="Size.Small"
+                                Color="@(context.Item.AtumQuantity > 0 ? Color.Info : Color.Default)">
+                            @context.Item.AtumQuantity.ToString("F0")
+                        </MudChip>
+                    </CellTemplate>
+                </PropertyColumn>
+
                 <PropertyColumn Property="x => x.LastSyncStatus" Title="Sync Status">
                     <CellTemplate>
-                        <MudChip T="string" Size="Size.Small"
+                        <MudChip Size="Size.Small"
                                 Color="@GetStatusColor(context.Item.LastSyncStatus)">
                             @context.Item.LastSyncStatus
                         </MudChip>
@@ -195,7 +204,8 @@
                                 <MudText><strong>Wholesale Price:</strong> €@(selectedProduct.WholesalePrice?.ToString("F2") ?? "N/A")</MudText>
                                 <MudText><strong>Sale Price:</strong> €@(selectedProduct.SalePrice?.ToString("F2") ?? "N/A")</MudText>
                                 <MudText><strong>Purchase Price:</strong> €@(selectedProduct.PurchasePrice?.ToString("F2") ?? "N/A")</MudText>
-                                <MudText><strong>Stock Quantity:</strong> @selectedProduct.Quantity.ToString("F0")</MudText>
+                                <MudText><strong>SoftOne Stock:</strong> @selectedProduct.Quantity.ToString("F0")</MudText>
+                                <MudText><strong>ATUM Stock:</strong> @selectedProduct.AtumQuantity.ToString("F0")</MudText>
                                 <MudText><strong>VAT:</strong> @selectedProduct.Vat</MudText>
                                 <MudText><strong>Discount:</strong> @(selectedProduct.Discount?.ToString("F2") ?? "N/A")%</MudText>
                             </MudCardContent>

@@ -29,23 +29,46 @@
                         Manually trigger synchronization between SoftOne Go and WooCommerce ATUM
                     </MudText>
 
-                    <MudButton Variant="Variant.Filled"
-                              Color="Color.Primary"
-                              Size="Size.Large"
-                              StartIcon="@Icons.Material.Filled.PlayArrow"
-                              OnClick="@StartManualSync"
-                              Disabled="@isSyncRunning"
-                              Class="mt-3">
-                        @if (isSyncRunning)
-                        {
-                            <MudProgressCircular Class="ms-n1" Size="Size.Small" Indeterminate="true" />
-                            <MudText Class="ms-2">Running Sync...</MudText>
-                        }
-                        else
-                        {
-                            <MudText>Start Manual Sync</MudText>
-                        }
-                    </MudButton>
+                    <MudGrid Class="mt-3">
+                        <MudItem xs="12" sm="6">
+                            <MudButton Variant="Variant.Filled"
+                                      Color="Color.Primary"
+                                      Size="Size.Large"
+                                      StartIcon="@Icons.Material.Filled.PlayArrow"
+                                      OnClick="@StartManualSync"
+                                      Disabled="@isSyncRunning"
+                                      FullWidth="true">
+                                @if (isSyncRunning)
+                                {
+                                    <MudProgressCircular Class="ms-n1" Size="Size.Small" Indeterminate="true" />
+                                    <MudText Class="ms-2">Running SoftOne Sync...</MudText>
+                                }
+                                else
+                                {
+                                    <MudText>SoftOne Sync</MudText>
+                                }
+                            </MudButton>
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudButton Variant="Variant.Filled"
+                                      Color="Color.Info"
+                                      Size="Size.Large"
+                                      StartIcon="@Icons.Material.Filled.Inventory"
+                                      OnClick="@StartAtumSync"
+                                      Disabled="@isAtumSyncRunning"
+                                      FullWidth="true">
+                                @if (isAtumSyncRunning)
+                                {
+                                    <MudProgressCircular Class="ms-n1" Size="Size.Small" Indeterminate="true" />
+                                    <MudText Class="ms-2">Running ATUM Sync...</MudText>
+                                }
+                                else
+                                {
+                                    <MudText>ATUM Sync</MudText>
+                                }
+                            </MudButton>
+                        </MudItem>
+                    </MudGrid>
 
                     @if (!string.IsNullOrEmpty(lastSyncMessage))
                     {

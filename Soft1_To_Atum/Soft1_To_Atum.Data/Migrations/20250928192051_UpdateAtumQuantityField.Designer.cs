@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Soft1_To_Atum.Data;
 
@@ -10,9 +11,11 @@ using Soft1_To_Atum.Data;
 namespace Soft1_To_Atum.Data.Migrations
 {
     [DbContext(typeof(SyncDbContext))]
-    partial class SyncDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250928192051_UpdateAtumQuantityField")]
+    partial class UpdateAtumQuantityField
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
@@ -188,7 +191,7 @@ namespace Soft1_To_Atum.Data.Migrations
                             Id = 1,
                             AtumLocationId = 870,
                             AtumLocationName = "store1_location",
-                            CreatedAt = new DateTime(2025, 9, 28, 19, 21, 49, 776, DateTimeKind.Utc).AddTicks(7940),
+                            CreatedAt = new DateTime(2025, 9, 28, 19, 20, 51, 125, DateTimeKind.Utc).AddTicks(3880),
                             EmailFromEmail = "",
                             EmailPassword = "",
                             EmailSmtpHost = "",
@@ -216,7 +219,7 @@ namespace Soft1_To_Atum.Data.Migrations
                             SyncAutoSync = true,
                             SyncEmailNotifications = true,
                             SyncIntervalMinutes = 15,
-                            UpdatedAt = new DateTime(2025, 9, 28, 19, 21, 49, 776, DateTimeKind.Utc).AddTicks(8060),
+                            UpdatedAt = new DateTime(2025, 9, 28, 19, 20, 51, 125, DateTimeKind.Utc).AddTicks(4010),
                             WooCommerceConsumerKey = "",
                             WooCommerceConsumerSecret = "",
                             WooCommerceUrl = "",

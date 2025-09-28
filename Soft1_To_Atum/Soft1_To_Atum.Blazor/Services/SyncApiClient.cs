@@ -113,6 +113,55 @@ public class SyncApiClient
         }
     }
 
+    public async Task<ManualSyncResponse?> StartAtumSyncAsync()
+    {
+        try
+        {
+            _logger.LogInformation("=== ATUM SYNC CLIENT REQUEST START ===");
+            _logger.LogInformation("HTTP Client BaseAddress: {BaseAddress}", _httpClient.BaseAddress);
+            _logger.LogInformation("Starting ATUM sync API call to /api/sync/atum");
+
+            var response = await _httpClient.PostAsync("/api/sync/atum", null);
+            _logger.LogInformation("ATUM sync API response status: {StatusCode}", response.StatusCode);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                _logger.LogInformation("ATUM sync API response content: {Content}", content);
+
+                var result = JsonSerializer.Deserialize<ManualSyncResponse>(content, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+
+                _logger.LogInformation("ATUM sync API call completed successfully. SyncLogId: {SyncLogId}", result?.SyncLogId);
+                _logger.LogInformation("=== ATUM SYNC CLIENT REQUEST SUCCESS ===");
+                return result;
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                _logger.LogError("ATUM sync API failed with status {StatusCode}: {ErrorContent}", response.StatusCode, errorContent);
+                throw new HttpRequestException($"ATUM sync failed: {response.StatusCode} - {errorContent}");
+            }
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "HTTP error during ATUM sync request to {BaseAddress}", _httpClient.BaseAddress);
+            throw new Exception($"Failed to connect to API service at {_httpClient.BaseAddress}. Error: {ex.Message}", ex);
+        }
+        catch (TaskCanceledException ex)
+        {
+            _logger.LogError(ex, "Timeout during ATUM sync request to {BaseAddress}", _httpClient.BaseAddress);
+            throw new Exception($"Request timed out connecting to API service at {_httpClient.BaseAddress}", ex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error during ATUM sync request");
+            throw new Exception($"Unexpected error during ATUM sync: {ex.Message}", ex);
+        }
+    }
+
     public async Task<ApiSettingsModel?> GetSettingsAsync()
     {
         try

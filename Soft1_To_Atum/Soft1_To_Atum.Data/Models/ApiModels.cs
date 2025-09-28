@@ -67,6 +67,7 @@ public class ProductResponse
 
     // Inventory
     public decimal Quantity { get; set; }
+    public decimal AtumQuantity { get; set; }
 
     // Additional Data
     public string ImageData { get; set; } = string.Empty;
@@ -337,5 +338,99 @@ public class SoftOneProduct
 
         return product;
     }
+}
 
+// ATUM API Models
+public class AtumInventoryResponse
+{
+    [JsonPropertyName("total")]
+    public int Total { get; set; }
+
+    [JsonPropertyName("items")]
+    public List<AtumInventoryItem> Items { get; set; } = [];
+}
+
+public class AtumInventoryItem
+{
+    [JsonPropertyName("id")]
+    public int Id { get; set; }
+
+    [JsonPropertyName("product_id")]
+    public int ProductId { get; set; }
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("priority")]
+    public int Priority { get; set; }
+
+    [JsonPropertyName("is_main")]
+    public bool IsMain { get; set; }
+
+    [JsonPropertyName("inventory_date")]
+    public DateTime InventoryDate { get; set; }
+
+    [JsonPropertyName("location")]
+    public Dictionary<string, string> Location { get; set; } = new();
+
+    [JsonPropertyName("meta_data")]
+    public AtumMetaData MetaData { get; set; } = new();
+
+    /// <summary>
+    /// Get SKU from meta data
+    /// </summary>
+    public string GetSku()
+    {
+        return MetaData?.Sku ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Get stock quantity from meta data
+    /// </summary>
+    public decimal GetStockQuantity()
+    {
+        return MetaData?.StockQuantity ?? 0;
+    }
+}
+
+public class AtumMetaData
+{
+    [JsonPropertyName("sku")]
+    public string Sku { get; set; } = string.Empty;
+
+    [JsonPropertyName("manage_stock")]
+    public bool ManageStock { get; set; }
+
+    [JsonPropertyName("stock_quantity")]
+    public decimal? StockQuantity { get; set; }
+
+    [JsonPropertyName("backorders")]
+    public string Backorders { get; set; } = string.Empty;
+
+    [JsonPropertyName("stock_status")]
+    public string StockStatus { get; set; } = string.Empty;
+
+    [JsonPropertyName("supplier_id")]
+    public string SupplierId { get; set; } = string.Empty;
+
+    [JsonPropertyName("supplier_sku")]
+    public string SupplierSku { get; set; } = string.Empty;
+
+    [JsonPropertyName("barcode")]
+    public string Barcode { get; set; } = string.Empty;
+
+    [JsonPropertyName("sold_individually")]
+    public bool SoldIndividually { get; set; }
+
+    [JsonPropertyName("price")]
+    public string Price { get; set; } = string.Empty;
+
+    [JsonPropertyName("regular_price")]
+    public string RegularPrice { get; set; } = string.Empty;
+
+    [JsonPropertyName("sale_price")]
+    public string SalePrice { get; set; } = string.Empty;
+
+    [JsonPropertyName("purchase_price")]
+    public string PurchasePrice { get; set; } = string.Empty;
 }

@@ -29,7 +29,8 @@ public class Product
     public decimal? Discount { get; set; } // ITEM.SODISCOUNT
 
     // Inventory
-    public decimal Quantity { get; set; } // ITEM.MTRL_ITEMTRDATA_QTY1
+    public decimal Quantity { get; set; } // ITEM.MTRL_ITEMTRDATA_QTY1 (SoftOne quantity)
+    public decimal AtumQuantity { get; set; } // ATUM inventory quantity
 
     // Additional Data
     public string ImageData { get; set; } = string.Empty; // ITEM.MTRL_ITEDOCDATA_SODATA

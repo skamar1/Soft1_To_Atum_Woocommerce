@@ -16,6 +16,7 @@ builder.Services.AddDbContext<SyncDbContext>(options =>
 // Add services
 builder.Services.AddScoped<SettingsService>();
 builder.Services.AddScoped<SoftOneApiService>();
+builder.Services.AddScoped<AtumApiService>();
 builder.Services.AddScoped<EmailService>();
 builder.Services.AddScoped<ProductMatchingService>();
 builder.Services.AddScoped<IWooCommerceAtumClient, WooCommerceAtumClient>();
@@ -201,6 +202,7 @@ productsGroup.MapGet("/", async (SyncDbContext db, int page = 1, int pageSize = 
             Sku = p.Sku ?? "",
             Price = p.Price,
             Quantity = p.Quantity,
+            AtumQuantity = p.AtumQuantity,
             LastSyncedAt = p.LastSyncedAt,
             LastSyncStatus = p.LastSyncStatus ?? "",
             // Add missing fields to ProductResponse
@@ -571,6 +573,120 @@ syncGroup.MapPost("/manual", async (SyncDbContext db, SettingsService settingsSe
 .WithName("StartManualSync")
 .WithSummary("Start a manual synchronization process")
 .WithDescription("Initiates a manual synchronization of products from SoftOne Go to WooCommerce ATUM");
+
+syncGroup.MapPost("/atum", async (SyncDbContext db, SettingsService settingsService, AtumApiService atumApiService, ProductMatchingService productMatchingService, ILogger<Program> logger, CancellationToken cancellationToken) =>
+{
+    logger.LogInformation("ATUM sync requested at {time}", DateTime.UtcNow);
+
+    // Get settings from database
+    var settings = await settingsService.GetAppSettingsAsync();
+
+    // Check if settings are valid
+    if (settings == null)
+    {
+        logger.LogError("Failed to retrieve settings");
+        return Results.Problem("Failed to retrieve settings");
+    }
+
+    // Deserialize to API model for easier handling
+    var apiSettings = settings.ToApiModel();
+
+    if (string.IsNullOrEmpty(apiSettings.WooCommerce.ConsumerKey) || string.IsNullOrEmpty(apiSettings.WooCommerce.ConsumerSecret))
+    {
+        logger.LogError("WooCommerce credentials are not configured");
+        return Results.Problem("WooCommerce credentials are not configured. Go to settings to configure the service.");
+    }
+
+    try
+    {
+        logger.LogInformation("Starting ATUM inventory fetch for location {LocationId}", apiSettings.ATUM.LocationId);
+
+        // Fetch all ATUM inventory items
+        var atumItems = await atumApiService.GetAllInventoryAsync(
+            apiSettings.WooCommerce.ConsumerKey,
+            apiSettings.WooCommerce.ConsumerSecret,
+            apiSettings.ATUM.LocationId,
+            cancellationToken);
+
+        logger.LogInformation("Retrieved {ItemCount} items from ATUM API, starting database sync...", atumItems.Count);
+
+        // Create sync log
+        var syncLog = new SyncLog
+        {
+            StartedAt = DateTime.UtcNow,
+            Status = "Running",
+            TotalProducts = atumItems.Count,
+            CreatedProducts = 0,
+            UpdatedProducts = 0,
+            SkippedProducts = 0,
+            ErrorCount = 0
+        };
+
+        db.SyncLogs.Add(syncLog);
+        await db.SaveChangesAsync(cancellationToken);
+
+        var createdCount = 0;
+        var updatedCount = 0;
+        var errorCount = 0;
+
+        // Process each ATUM item using ProductMatchingService
+        foreach (var atumItem in atumItems)
+        {
+            try
+            {
+                var result = await productMatchingService.ProcessAtumProductAsync(atumItem, cancellationToken);
+
+                if (result.Success)
+                {
+                    if (result.Action == ProductAction.Created)
+                        createdCount++;
+                    else if (result.Action == ProductAction.Updated)
+                        updatedCount++;
+
+                    logger.LogDebug("Processed ATUM product {ProductId}: {Action} via {MatchType} match",
+                        result.Product.Id, result.Action, result.MatchType);
+                }
+                else
+                {
+                    errorCount++;
+                    logger.LogWarning("Failed to process ATUM product: {ErrorMessage}", result.ErrorMessage);
+                }
+            }
+            catch (Exception ex)
+            {
+                errorCount++;
+                logger.LogError(ex, "Error processing ATUM product {AtumId} ({SKU}): {Message}",
+                    atumItem.Id, atumItem.GetSku(), ex.Message);
+            }
+        }
+
+        // Update sync log with results
+        syncLog.CreatedProducts = createdCount;
+        syncLog.UpdatedProducts = updatedCount;
+        syncLog.ErrorCount = errorCount;
+        syncLog.Status = errorCount > 0 ? "Completed with errors" : "Completed";
+        syncLog.CompletedAt = DateTime.UtcNow;
+
+        await db.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation("ATUM sync completed. Created: {Created}, Updated: {Updated}, Errors: {Errors}",
+            createdCount, updatedCount, errorCount);
+
+        return Results.Ok(new ManualSyncResponse
+        {
+            Message = $"ATUM sync completed successfully. Created: {createdCount}, Updated: {updatedCount}, Errors: {errorCount}",
+            SyncLogId = syncLog.Id
+        });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Error during ATUM sync: {Message}", ex.Message);
+        return Results.Problem($"Error during ATUM sync: {ex.Message}");
+    }
+})
+.WithName("StartAtumSync")
+.WithSummary("Start an ATUM inventory synchronization")
+.WithDescription("Initiates a synchronization of inventory data from ATUM Multi Inventory");
 
 // Settings endpoints
 settingsGroup.MapGet("/", async (SettingsService settingsService, ILogger<Program> logger) =>

@@ -12,6 +12,7 @@ public partial class Home : ComponentBase
     [Inject] private ILogger<Home> Logger { get; set; } = null!;
 
     private bool isSyncRunning = false;
+    private bool isAtumSyncRunning = false;
     private string lastSyncMessage = string.Empty;
     private Severity lastSyncSeverity = Severity.Info;
     private SyncLogResponse? lastSyncLog;
@@ -74,6 +75,63 @@ public partial class Home : ComponentBase
         finally
         {
             isSyncRunning = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task StartAtumSync()
+    {
+        if (isAtumSyncRunning) return;
+
+        Logger.LogInformation("User initiated ATUM sync from dashboard");
+        isAtumSyncRunning = true;
+        lastSyncMessage = "Starting ATUM synchronization...";
+        lastSyncSeverity = Severity.Info;
+        StateHasChanged();
+
+        try
+        {
+            var result = await SyncApi.StartAtumSyncAsync();
+
+            if (result != null)
+            {
+                lastSyncMessage = result.Message;
+                lastSyncSeverity = Severity.Success;
+                Logger.LogInformation("ATUM sync completed successfully. SyncLogId: {SyncLogId}", result.SyncLogId);
+
+                // Refresh dashboard to show updated statistics
+                await RefreshDashboard();
+
+                Snackbar.Add("ATUM sync completed successfully!", Severity.Success);
+            }
+            else
+            {
+                lastSyncMessage = "ATUM sync completed but no details were returned";
+                lastSyncSeverity = Severity.Warning;
+                Logger.LogWarning("ATUM sync returned null result");
+
+                Snackbar.Add("ATUM sync completed but response was empty", Severity.Warning);
+            }
+        }
+        catch (HttpRequestException ex)
+        {
+            lastSyncMessage = $"Connection error: {ex.Message}";
+            lastSyncSeverity = Severity.Error;
+            Logger.LogError(ex, "HTTP error during ATUM sync: {Message}", ex.Message);
+
+            Snackbar.Add("Failed to connect to sync service", Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            lastSyncMessage = $"ATUM sync failed: {ex.Message}";
+            lastSyncSeverity = Severity.Error;
+            Logger.LogError(ex, "Error during ATUM sync: {Message}", ex.Message);
+
+            Snackbar.Add($"ATUM sync failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            isAtumSyncRunning = false;
             StateHasChanged();
         }
     }
