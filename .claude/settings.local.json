@@ -17,7 +17,12 @@
       "Bash(dotnet clean:*)",
       "Bash(dotnet build:*)",
       "Bash(open \"https://localhost:17232/login?t=5b8479567b9755efbc0964c62bf8fd80\")",
-      "Bash(sqlite3:*)"
+      "Bash(sqlite3:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(gh repo create:*)",
+      "Bash(find:*)",
+      "Bash(dotnet ef database:*)"
     ]
   }
 }

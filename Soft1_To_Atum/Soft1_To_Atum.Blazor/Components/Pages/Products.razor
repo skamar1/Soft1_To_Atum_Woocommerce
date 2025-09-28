@@ -1,0 +1,257 @@
+@page "/products"
+@using Soft1_To_Atum.Blazor.Services
+@using Soft1_To_Atum.Data.Models
+@rendermode InteractiveServer
+
+<PageTitle>Products - SoftOne to ATUM Sync</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
+
+    <MudText Typo="Typo.h3" GutterBottom="true">
+        <MudIcon Icon="Icons.Material.Filled.Inventory" Class="mr-3" />
+        Products Database
+    </MudText>
+
+    <MudPaper Class="pa-4 mb-4">
+        <MudGrid Justify="Justify.Center">
+            <MudItem xs="12" sm="6" md="3">
+                <MudTextField @bind-Value="searchTerm"
+                             Label="Search products..."
+                             Variant="Variant.Outlined"
+                             AdornmentIcon="Icons.Material.Filled.Search"
+                             Adornment="Adornment.End"
+                             OnKeyUp="OnSearchKeyUp"
+                             Immediate="true" />
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudSelect @bind-Value="filterStatus"
+                          Label="Sync Status"
+                          Variant="Variant.Outlined"
+                          T="string">
+                    <MudSelectItem Value="@("All")" />
+                    <MudSelectItem Value="@("Created")" />
+                    <MudSelectItem Value="@("Updated")" />
+                    <MudSelectItem Value="@("Error")" />
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudButton Variant="Variant.Filled"
+                          Color="Color.Primary"
+                          StartIcon="Icons.Material.Filled.Refresh"
+                          OnClick="RefreshProducts">
+                    Refresh
+                </MudButton>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="3">
+                <MudChip T="string" Icon="Icons.Material.Filled.Numbers"
+                        Color="Color.Info"
+                        Size="Size.Medium">
+                    Total: @products.Count
+                </MudChip>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    @if (loading)
+    {
+        <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="ma-4" />
+        <MudText Align="Align.Center" Class="mt-4">Loading products...</MudText>
+    }
+    else
+    {
+        <MudDataGrid Items="@filteredProducts"
+                     SortMode="SortMode.Multiple"
+                     Filterable="false"
+                     ColumnResizeMode="ResizeMode.Container"
+                     Height="600px"
+                     Dense="true">
+
+            <Columns>
+                <PropertyColumn Property="x => x.Id" Title="ID" />
+
+                <PropertyColumn Property="x => x.InternalId" Title="MTRL" />
+
+                <PropertyColumn Property="x => x.Name" Title="Name">
+                    <CellTemplate>
+                        <MudText>
+                            @context.Item.Name
+                        </MudText>
+                        @if (!string.IsNullOrEmpty(context.Item.Category))
+                        {
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                @context.Item.Category
+                            </MudText>
+                        }
+                    </CellTemplate>
+                </PropertyColumn>
+
+                <PropertyColumn Property="x => x.Sku" Title="SKU" />
+
+                <PropertyColumn Property="x => x.Barcode" Title="Barcode" />
+
+                <PropertyColumn Property="x => x.Price" Title="Price" Format="C2">
+                    <CellTemplate>
+                        <MudText Color="Color.Success">
+                            €@context.Item.Price.ToString("F2")
+                        </MudText>
+                    </CellTemplate>
+                </PropertyColumn>
+
+                <PropertyColumn Property="x => x.Quantity" Title="Stock" Format="F0">
+                    <CellTemplate>
+                        <MudChip T="string" Size="Size.Small"
+                                Color="@(context.Item.Quantity > 0 ? Color.Success : Color.Warning)">
+                            @context.Item.Quantity.ToString("F0")
+                        </MudChip>
+                    </CellTemplate>
+                </PropertyColumn>
+
+                <PropertyColumn Property="x => x.LastSyncStatus" Title="Sync Status">
+                    <CellTemplate>
+                        <MudChip T="string" Size="Size.Small"
+                                Color="@GetStatusColor(context.Item.LastSyncStatus)">
+                            @context.Item.LastSyncStatus
+                        </MudChip>
+                    </CellTemplate>
+                </PropertyColumn>
+
+                <PropertyColumn Property="x => x.LastSyncedAt" Title="Last Sync" Format="dd/MM/yyyy HH:mm">
+                    <CellTemplate>
+                        @if (context.Item.LastSyncedAt != DateTime.MinValue)
+                        {
+                            <MudText Typo="Typo.body2">
+                                @context.Item.LastSyncedAt.ToString("dd/MM/yyyy HH:mm")
+                            </MudText>
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                                Never
+                            </MudText>
+                        }
+                    </CellTemplate>
+                </PropertyColumn>
+
+                <TemplateColumn Title="Actions" Sortable="false">
+                    <CellTemplate>
+                        <MudButtonGroup Variant="Variant.Text" Size="Size.Small">
+                            <MudIconButton Icon="Icons.Material.Filled.Info"
+                                          Color="Color.Primary"
+                                          Size="Size.Small"
+                                          OnClick="() => ViewProduct(context.Item)" />
+                            <MudIconButton Icon="Icons.Material.Filled.Edit"
+                                          Color="Color.Secondary"
+                                          Size="Size.Small"
+                                          OnClick="() => EditProduct(context.Item)" />
+                        </MudButtonGroup>
+                    </CellTemplate>
+                </TemplateColumn>
+
+            </Columns>
+        </MudDataGrid>
+    }
+
+    <!-- Product Details Dialog -->
+    <MudDialog @bind-Visible="showProductDialog">
+        <TitleContent>
+            <MudText Typo="Typo.h6">
+                <MudIcon Icon="Icons.Material.Filled.Info" Class="mr-3" />
+                Product Details
+            </MudText>
+        </TitleContent>
+        <DialogContent>
+            @if (selectedProduct != null)
+            {
+                <MudGrid>
+                    <MudItem xs="12" md="6">
+                        <MudCard Elevation="2" Class="mb-4">
+                            <MudCardHeader>
+                                <CardHeaderContent>
+                                    <MudText Typo="Typo.h6">Basic Information</MudText>
+                                </CardHeaderContent>
+                            </MudCardHeader>
+                            <MudCardContent>
+                                <MudText><strong>ID:</strong> @selectedProduct.Id</MudText>
+                                <MudText><strong>Name:</strong> @selectedProduct.Name</MudText>
+                                <MudText><strong>Internal ID (MTRL):</strong> @selectedProduct.InternalId</MudText>
+                                <MudText><strong>SKU:</strong> @selectedProduct.Sku</MudText>
+                                <MudText><strong>Barcode:</strong> @selectedProduct.Barcode</MudText>
+                                <MudText><strong>Category:</strong> @selectedProduct.Category</MudText>
+                                <MudText><strong>Unit:</strong> @selectedProduct.Unit</MudText>
+                                <MudText><strong>Group:</strong> @selectedProduct.Group</MudText>
+                            </MudCardContent>
+                        </MudCard>
+                    </MudItem>
+
+                    <MudItem xs="12" md="6">
+                        <MudCard Elevation="2" Class="mb-4">
+                            <MudCardHeader>
+                                <CardHeaderContent>
+                                    <MudText Typo="Typo.h6">Pricing & Inventory</MudText>
+                                </CardHeaderContent>
+                            </MudCardHeader>
+                            <MudCardContent>
+                                <MudText><strong>Price:</strong> €@selectedProduct.Price.ToString("F2")</MudText>
+                                <MudText><strong>Wholesale Price:</strong> €@(selectedProduct.WholesalePrice?.ToString("F2") ?? "N/A")</MudText>
+                                <MudText><strong>Sale Price:</strong> €@(selectedProduct.SalePrice?.ToString("F2") ?? "N/A")</MudText>
+                                <MudText><strong>Purchase Price:</strong> €@(selectedProduct.PurchasePrice?.ToString("F2") ?? "N/A")</MudText>
+                                <MudText><strong>Stock Quantity:</strong> @selectedProduct.Quantity.ToString("F0")</MudText>
+                                <MudText><strong>VAT:</strong> @selectedProduct.Vat</MudText>
+                                <MudText><strong>Discount:</strong> @(selectedProduct.Discount?.ToString("F2") ?? "N/A")%</MudText>
+                            </MudCardContent>
+                        </MudCard>
+                    </MudItem>
+
+                    <MudItem xs="12">
+                        <MudCard Elevation="2" Class="mb-4">
+                            <MudCardHeader>
+                                <CardHeaderContent>
+                                    <MudText Typo="Typo.h6">Sync Information</MudText>
+                                </CardHeaderContent>
+                            </MudCardHeader>
+                            <MudCardContent>
+                                <MudText><strong>Last Sync Status:</strong>
+                                    <MudChip T="string" Size="Size.Small" Color="@GetStatusColor(selectedProduct.LastSyncStatus)">
+                                        @selectedProduct.LastSyncStatus
+                                    </MudChip>
+                                </MudText>
+                                <MudText><strong>Last Synced:</strong> @selectedProduct.LastSyncedAt.ToString("dd/MM/yyyy HH:mm:ss")</MudText>
+                                <MudText><strong>Created:</strong> @selectedProduct.CreatedAt.ToString("dd/MM/yyyy HH:mm:ss")</MudText>
+                                <MudText><strong>Updated:</strong> @selectedProduct.UpdatedAt.ToString("dd/MM/yyyy HH:mm:ss")</MudText>
+                                @if (!string.IsNullOrEmpty(selectedProduct.LastSyncError))
+                                {
+                                    <MudText><strong>Last Error:</strong></MudText>
+                                    <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">
+                                        @selectedProduct.LastSyncError
+                                    </MudAlert>
+                                }
+                            </MudCardContent>
+                        </MudCard>
+                    </MudItem>
+
+                    @if (!string.IsNullOrEmpty(selectedProduct.SoftOneId) || !string.IsNullOrEmpty(selectedProduct.WooCommerceId) || !string.IsNullOrEmpty(selectedProduct.AtumId))
+                    {
+                        <MudItem xs="12">
+                            <MudCard Elevation="2">
+                                <MudCardHeader>
+                                    <CardHeaderContent>
+                                        <MudText Typo="Typo.h6">External System IDs</MudText>
+                                    </CardHeaderContent>
+                                </MudCardHeader>
+                                <MudCardContent>
+                                    <MudText><strong>SoftOne ID:</strong> @selectedProduct.SoftOneId</MudText>
+                                    <MudText><strong>WooCommerce ID:</strong> @selectedProduct.WooCommerceId</MudText>
+                                    <MudText><strong>ATUM ID:</strong> @selectedProduct.AtumId</MudText>
+                                </MudCardContent>
+                            </MudCard>
+                        </MudItem>
+                    }
+                </MudGrid>
+            }
+        </DialogContent>
+        <DialogActions>
+            <MudButton OnClick="() => showProductDialog = false">Close</MudButton>
+        </DialogActions>
+    </MudDialog>
+
+</MudContainer>

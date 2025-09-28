@@ -180,72 +180,22 @@ syncGroup.MapGet("/status", async (SyncDbContext db) =>
 
 productsGroup.MapGet("/", async (SyncDbContext db, int page = 1, int pageSize = 50) =>
 {
-    try
+    var products = await db.Products
+        .OrderByDescending(p => p.LastSyncedAt)
+        .Skip((page - 1) * pageSize)
+        .Take(pageSize)
+        .ToListAsync();
+
+    var total = await db.Products.CountAsync();
+
+    return Results.Ok(new
     {
-        var products = await db.Products
-            .OrderByDescending(p => p.LastSyncedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync();
-
-        var total = await db.Products.CountAsync();
-
-        // Map to ProductResponse for consistent API
-        var productResponses = products.Select(p => new ProductResponse
-        {
-            Id = p.Id,
-            SoftOneId = p.SoftOneId ?? "",
-            WooCommerceId = p.WooCommerceId ?? "",
-            AtumId = p.AtumId ?? "",
-            Name = p.Name ?? "",
-            Sku = p.Sku ?? "",
-            Price = p.Price,
-            Quantity = p.Quantity,
-            LastSyncedAt = p.LastSyncedAt,
-            LastSyncStatus = p.LastSyncStatus ?? "",
-            // Add missing fields to ProductResponse
-            InternalId = p.InternalId ?? "",
-            Barcode = p.Barcode ?? "",
-            Category = p.Category ?? "",
-            Unit = p.Unit ?? "",
-            Group = p.Group ?? "",
-            Vat = p.Vat ?? "",
-            WholesalePrice = p.WholesalePrice,
-            SalePrice = p.SalePrice,
-            PurchasePrice = p.PurchasePrice,
-            Discount = p.Discount,
-            ImageData = p.ImageData ?? "",
-            ZoomInfo = p.ZoomInfo ?? "",
-            CreatedAt = p.CreatedAt,
-            UpdatedAt = p.UpdatedAt,
-            LastSyncError = p.LastSyncError
-        }).ToList();
-
-        return Results.Ok(new ProductsPageResponse
-        {
-            Products = productResponses,
-            Page = page,
-            PageSize = pageSize,
-            Total = total,
-            TotalPages = (int)Math.Ceiling((double)total / pageSize)
-        });
-    }
-    catch (Exception ex)
-    {
-        // Log the actual error for debugging
-        Console.WriteLine($"Error in products endpoint: {ex.Message}");
-        Console.WriteLine($"Stack trace: {ex.StackTrace}");
-
-        // Return empty response with error
-        return Results.Ok(new ProductsPageResponse
-        {
-            Products = new List<ProductResponse>(),
-            Page = page,
-            PageSize = pageSize,
-            Total = 0,
-            TotalPages = 0
-        });
-    }
+        Products = products,
+        Page = page,
+        PageSize = pageSize,
+        Total = total,
+        TotalPages = (int)Math.Ceiling((double)total / pageSize)
+    });
 })
 .WithName("GetProducts")
 .WithSummary("Get paginated list of synchronized products")
@@ -297,12 +247,8 @@ syncGroup.MapPost("/manual", async (SyncDbContext db, SettingsService settingsSe
         return Results.Problem("Failed to retrieve settings");
     }
 
-    logger.LogDebug("Retrieved settings from database");
-
     //deserialize to api model for easier handling
     var apiSettings = settings.ToApiModel();
-
-   // logger.LogDebug($"Retrieved settings from database Store name {apiSettings.name}");
 
     var client = new HttpClient();
     var request = new HttpRequestMessage(HttpMethod.Post, $"{apiSettings.SoftOneGo.BaseUrl}/list/item");
@@ -313,16 +259,7 @@ syncGroup.MapPost("/manual", async (SyncDbContext db, SettingsService settingsSe
     Console.WriteLine("Sending request to SoftOne Go API...");
 
     var response = await client.SendAsync(request);
-
-    if (!response.IsSuccessStatusCode)
-    {
-        var errorContent = await response.Content.ReadAsStringAsync();
-        logger.LogError("SoftOne API returned error {StatusCode}: {ErrorContent}", response.StatusCode, errorContent);
-        logger.LogError("Request URL: {RequestUrl}", request.RequestUri);
-        logger.LogError("Request Headers: s1code={S1Code}", apiSettings.SoftOneGo.S1Code);
-
-        return Results.Problem($"SoftOne API error: {response.StatusCode} - {errorContent}");
-    }
+    response.EnsureSuccessStatusCode();
 
 
     // Register encoding provider for Windows-1253
@@ -408,76 +345,15 @@ syncGroup.MapPost("/manual", async (SyncDbContext db, SettingsService settingsSe
                     Console.WriteLine($"Product: {name} | Code: {code} | Price: €{price} | Stock: {stock}");
                 }
                 
-                // Process products using ProductMatchingService
-                logger.LogInformation("Retrieved {ProductCount} products from SoftOne Go API, starting database sync...", products.Count);
-
-                // Create sync log
-                var syncLog = new SyncLog
-                {
-                    StartedAt = DateTime.UtcNow,
-                    Status = "Running",
-                    TotalProducts = products.Count,
-                    CreatedProducts = 0,
-                    UpdatedProducts = 0,
-                    SkippedProducts = 0,
-                    ErrorCount = 0
-                };
-
-                db.SyncLogs.Add(syncLog);
-                await db.SaveChangesAsync(cancellationToken);
-
-                var createdCount = 0;
-                var updatedCount = 0;
-                var errorCount = 0;
-
-                // Process each product using ProductMatchingService
-                foreach (var product in products)
-                {
-                    try
-                    {
-                        var result = await productMatchingService.ProcessSoftOneProductAsync(product, cancellationToken);
-
-                        if (result.Success)
-                        {
-                            if (result.Action == ProductAction.Created)
-                                createdCount++;
-                            else if (result.Action == ProductAction.Updated)
-                                updatedCount++;
-
-                            logger.LogDebug("Processed product {ProductId}: {Action} via {MatchType} match",
-                                result.Product.Id, result.Action, result.MatchType);
-                        }
-                        else
-                        {
-                            errorCount++;
-                            logger.LogWarning("Failed to process SoftOne product: {ErrorMessage}", result.ErrorMessage);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        errorCount++;
-                        var productName = product.GetValueOrDefault("ITEM.NAME") ?? "Unknown";
-                        logger.LogError(ex, "Error processing SoftOne product {ProductName}: {Message}",
-                            productName, ex.Message);
-                    }
-                }
-
-                // Update sync log with results
-                syncLog.CreatedProducts = createdCount;
-                syncLog.UpdatedProducts = updatedCount;
-                syncLog.ErrorCount = errorCount;
-                syncLog.Status = errorCount > 0 ? "Completed with errors" : "Completed";
-                syncLog.CompletedAt = DateTime.UtcNow;
-
-                await db.SaveChangesAsync(cancellationToken);
-
-                logger.LogInformation("Manual sync completed. Created: {Created}, Updated: {Updated}, Errors: {Errors}",
-                    createdCount, updatedCount, errorCount);
-
-                return Results.Ok(new ManualSyncResponse
-                {
-                    Message = $"Manual sync completed successfully. Created: {createdCount}, Updated: {updatedCount}, Errors: {errorCount}",
-                    SyncLogId = syncLog.Id
+                // TODO: Process products for WooCommerce synchronization
+                logger.LogInformation("Retrieved {ProductCount} products from SoftOne Go API", products.Count);
+                
+                return Results.Ok(new { 
+                    success = true, 
+                    message = $"Successfully retrieved {products.Count} products",
+                    totalCount = totalCount,
+                    fieldNames = fieldNames,
+                    sampleProducts = products.Take(3).ToList()
                 });
             }
             else
@@ -522,6 +398,7 @@ syncGroup.MapPost("/manual", async (SyncDbContext db, SettingsService settingsSe
 
 
 
+    return null;
 
 
 

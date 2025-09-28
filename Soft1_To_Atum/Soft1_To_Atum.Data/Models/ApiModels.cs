@@ -39,15 +39,44 @@ public class SyncLogResponse
 public class ProductResponse
 {
     public int Id { get; set; }
+
+    // External System IDs
     public string SoftOneId { get; set; } = string.Empty;
     public string WooCommerceId { get; set; } = string.Empty;
     public string AtumId { get; set; } = string.Empty;
-    public string Name { get; set; } = string.Empty;
+
+    // SoftOne Fields for Matching
+    public string InternalId { get; set; } = string.Empty;
     public string Sku { get; set; } = string.Empty;
+    public string Barcode { get; set; } = string.Empty;
+
+    // Product Information
+    public string Name { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public string Unit { get; set; } = string.Empty;
+    public string Group { get; set; } = string.Empty;
+    public string Vat { get; set; } = string.Empty;
+
+    // Pricing
     public decimal Price { get; set; }
-    public int Quantity { get; set; }
+    public decimal? WholesalePrice { get; set; }
+    public decimal? SalePrice { get; set; }
+    public decimal? PurchasePrice { get; set; }
+    public decimal? Discount { get; set; }
+
+    // Inventory
+    public decimal Quantity { get; set; }
+
+    // Additional Data
+    public string ImageData { get; set; } = string.Empty;
+    public string ZoomInfo { get; set; } = string.Empty;
+
+    // Sync Tracking
     public DateTime LastSyncedAt { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
     public string LastSyncStatus { get; set; } = string.Empty;
+    public string? LastSyncError { get; set; }
 }
 
 public class ProductsPageResponse
