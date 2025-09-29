@@ -5,7 +5,7 @@
 
 <PageTitle>Products - SoftOne to ATUM Sync</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
+<MudContainer MaxWidth="MaxWidth.False" Class="mt-4 px-2">
 
     <MudText Typo="Typo.h3" GutterBottom="true">
         <MudIcon Icon="Icons.Material.Filled.Inventory" Class="mr-3" />
@@ -34,12 +34,22 @@
                     <MudSelectItem Value="@("Error")" />
                 </MudSelect>
             </MudItem>
-            <MudItem xs="12" sm="6" md="3">
+            <MudItem xs="12" sm="6" md="2">
                 <MudButton Variant="Variant.Filled"
                           Color="Color.Primary"
                           StartIcon="Icons.Material.Filled.Refresh"
-                          OnClick="RefreshProducts">
+                          OnClick="RefreshProducts"
+                          FullWidth="true">
                     Refresh
+                </MudButton>
+            </MudItem>
+            <MudItem xs="12" sm="6" md="2">
+                <MudButton Variant="Variant.Filled"
+                          Color="Color.Error"
+                          StartIcon="Icons.Material.Filled.DeleteSweep"
+                          OnClick="DeleteAllProducts"
+                          FullWidth="true">
+                    Clear DB
                 </MudButton>
             </MudItem>
             <MudItem xs="12" sm="6" md="3">
@@ -63,8 +73,10 @@
                      SortMode="SortMode.Multiple"
                      Filterable="false"
                      ColumnResizeMode="ResizeMode.Container"
-                     Height="600px"
-                     Dense="true">
+                     FixedHeader="true"
+                     Dense="true"
+                     Class="mud-table-dense"
+                     Style="height: calc(100vh - 280px);">
 
             <Columns>
                 <PropertyColumn Property="x => x.Id" Title="ID" />
@@ -99,7 +111,7 @@
 
                 <PropertyColumn Property="x => x.Quantity" Title="SoftOne Stock" Format="F0">
                     <CellTemplate>
-                        <MudChip Size="Size.Small"
+                        <MudChip T="string" Size="Size.Small"
                                 Color="@(context.Item.Quantity > 0 ? Color.Success : Color.Warning)">
                             @context.Item.Quantity.ToString("F0")
                         </MudChip>
@@ -108,7 +120,7 @@
 
                 <PropertyColumn Property="x => x.AtumQuantity" Title="ATUM Stock" Format="F0">
                     <CellTemplate>
-                        <MudChip Size="Size.Small"
+                        <MudChip T="string" Size="Size.Small"
                                 Color="@(context.Item.AtumQuantity > 0 ? Color.Info : Color.Default)">
                             @context.Item.AtumQuantity.ToString("F0")
                         </MudChip>
@@ -117,7 +129,7 @@
 
                 <PropertyColumn Property="x => x.LastSyncStatus" Title="Sync Status">
                     <CellTemplate>
-                        <MudChip Size="Size.Small"
+                        <MudChip T="string" Size="Size.Small"
                                 Color="@GetStatusColor(context.Item.LastSyncStatus)">
                             @context.Item.LastSyncStatus
                         </MudChip>

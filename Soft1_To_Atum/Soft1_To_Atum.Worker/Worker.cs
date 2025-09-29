@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Soft1_To_Atum.Data;
 using Soft1_To_Atum.Data.Models;
 using Soft1_To_Atum.Data.Services;
+using LegacyWooCommerceProduct = Soft1_To_Atum.Data.Services.WooCommerceProduct;
 
 namespace Soft1_To_Atum.Worker;
 
@@ -322,7 +323,7 @@ public class SyncWorker : BackgroundService
     }
 
     private async Task UpdateExistingProduct(
-        WooCommerceProduct existingProduct,
+        LegacyWooCommerceProduct existingProduct,
         SoftOneProduct softOneProduct,
         int storeId,
         IWooCommerceAtumClient wooCommerceClient,
@@ -357,7 +358,7 @@ public class SyncWorker : BackgroundService
         _logger.LogInformation("Updated existing product {Sku} (WooCommerce ID: {ProductId})", existingProduct.Sku, existingProduct.Id);
     }
 
-    private async Task SaveProductToDatabase(SoftOneProduct softOneProduct, WooCommerceProduct wooProduct, SyncDbContext dbContext, CancellationToken cancellationToken)
+    private async Task SaveProductToDatabase(SoftOneProduct softOneProduct, LegacyWooCommerceProduct wooProduct, SyncDbContext dbContext, CancellationToken cancellationToken)
     {
         var product = new Product
         {
@@ -376,7 +377,7 @@ public class SyncWorker : BackgroundService
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    private async Task UpdateProductInDatabase(SoftOneProduct softOneProduct, WooCommerceProduct wooProduct, SyncDbContext dbContext, CancellationToken cancellationToken)
+    private async Task UpdateProductInDatabase(SoftOneProduct softOneProduct, LegacyWooCommerceProduct wooProduct, SyncDbContext dbContext, CancellationToken cancellationToken)
     {
         var product = await dbContext.Products
             .FirstOrDefaultAsync(p => p.WooCommerceId == wooProduct.Id.ToString(), cancellationToken);

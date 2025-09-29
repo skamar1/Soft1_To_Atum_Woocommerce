@@ -112,6 +112,116 @@ public class ConnectionTestResponse
     public string Message { get; set; } = string.Empty;
 }
 
+public class ProductStatisticsResponse
+{
+    public int Total { get; set; }
+    public ProductSourceStatistics BySources { get; set; } = new();
+    public ProductStatusStatistics ByStatus { get; set; } = new();
+    public ProductIntegrationStatistics Integration { get; set; } = new();
+}
+
+public class ProductSourceStatistics
+{
+    public int SoftOne { get; set; }
+    public int ATUM { get; set; }
+    public int WooCommerce { get; set; }
+}
+
+public class ProductStatusStatistics
+{
+    public int Created { get; set; }
+    public int Updated { get; set; }
+    public int Error { get; set; }
+    public int Skipped { get; set; }
+}
+
+public class ProductIntegrationStatistics
+{
+    public int SoftOneAndATUM { get; set; }
+    public int SoftOneAndWooCommerce { get; set; }
+    public int ATUMAndWooCommerce { get; set; }
+    public int AllThreeSources { get; set; }
+}
+
+// ATUM Batch Operation Models
+public class AtumBatchRequest
+{
+    public List<AtumBatchCreateItem> Create { get; set; } = new();
+    public List<AtumBatchUpdateItem> Update { get; set; } = new();
+    public List<int> Delete { get; set; } = new();
+}
+
+public class AtumBatchCreateItem
+{
+    public int ProductId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public bool IsMain { get; set; } = false;
+    public List<int> Location { get; set; } = new();
+    public AtumBatchMetaData MetaData { get; set; } = new();
+}
+
+public class AtumBatchUpdateItem
+{
+    [JsonPropertyName("id")]
+    public int Id { get; set; }
+
+    [JsonPropertyName("stock_quantity")]
+    public decimal StockQuantity { get; set; }
+}
+
+public class AtumBatchMetaData
+{
+    public string Sku { get; set; } = string.Empty;
+    public bool ManageStock { get; set; } = true;
+    public decimal StockQuantity { get; set; }
+    public bool Backorders { get; set; } = false;
+    public string StockStatus { get; set; } = string.Empty;
+    public string Barcode { get; set; } = string.Empty;
+}
+
+public class AtumBatchResponse
+{
+    public List<AtumBatchResponseItem> Create { get; set; } = new();
+    public List<AtumBatchResponseItem> Update { get; set; } = new();
+    public List<AtumBatchResponseItem> Delete { get; set; } = new();
+}
+
+public class AtumBatchResponseItem
+{
+    public int Id { get; set; }
+    public AtumBatchError? Error { get; set; }
+    public int ProductId { get; set; }
+    public string Name { get; set; } = string.Empty;
+}
+
+public class AtumBatchError
+{
+    public string Code { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+    public AtumBatchErrorData? Data { get; set; }
+}
+
+public class AtumBatchErrorData
+{
+    public int Status { get; set; }
+}
+
+public class AtumBatchSyncResponse
+{
+    public string Message { get; set; } = string.Empty;
+    public int SyncLogId { get; set; }
+    public AtumBatchStats Stats { get; set; } = new();
+}
+
+public class AtumBatchStats
+{
+    public int TotalProcessed { get; set; }
+    public int Created { get; set; }
+    public int Updated { get; set; }
+    public int Errors { get; set; }
+    public int Skipped { get; set; }
+}
+
 // API Models για Settings
 public class ApiSettingsModel
 {
@@ -433,4 +543,245 @@ public class AtumMetaData
 
     [JsonPropertyName("purchase_price")]
     public string PurchasePrice { get; set; } = string.Empty;
+}
+
+// WooCommerce API Models
+public class WooCommerceProduct
+{
+    [JsonPropertyName("id")]
+    public int Id { get; set; }
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("slug")]
+    public string Slug { get; set; } = string.Empty;
+
+    [JsonPropertyName("permalink")]
+    public string Permalink { get; set; } = string.Empty;
+
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = string.Empty;
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = string.Empty;
+
+    [JsonPropertyName("featured")]
+    public bool Featured { get; set; }
+
+    [JsonPropertyName("catalog_visibility")]
+    public string CatalogVisibility { get; set; } = string.Empty;
+
+    [JsonPropertyName("description")]
+    public string Description { get; set; } = string.Empty;
+
+    [JsonPropertyName("short_description")]
+    public string ShortDescription { get; set; } = string.Empty;
+
+    [JsonPropertyName("sku")]
+    public string Sku { get; set; } = string.Empty;
+
+    [JsonPropertyName("price")]
+    public string Price { get; set; } = string.Empty;
+
+    [JsonPropertyName("regular_price")]
+    public string RegularPrice { get; set; } = string.Empty;
+
+    [JsonPropertyName("sale_price")]
+    public string SalePrice { get; set; } = string.Empty;
+
+    [JsonPropertyName("on_sale")]
+    public bool OnSale { get; set; }
+
+    [JsonPropertyName("purchasable")]
+    public bool Purchasable { get; set; }
+
+    [JsonPropertyName("total_sales")]
+    public int TotalSales { get; set; }
+
+    [JsonPropertyName("virtual")]
+    public bool Virtual { get; set; }
+
+    [JsonPropertyName("downloadable")]
+    public bool Downloadable { get; set; }
+
+    [JsonPropertyName("manage_stock")]
+    public bool ManageStock { get; set; }
+
+    [JsonPropertyName("stock_quantity")]
+    public int? StockQuantity { get; set; }
+
+    [JsonPropertyName("stock_status")]
+    public string StockStatus { get; set; } = string.Empty;
+
+    [JsonPropertyName("backorders")]
+    public string Backorders { get; set; } = string.Empty;
+
+    [JsonPropertyName("backorders_allowed")]
+    public bool BackordersAllowed { get; set; }
+
+    [JsonPropertyName("backordered")]
+    public bool Backordered { get; set; }
+
+    [JsonPropertyName("sold_individually")]
+    public bool SoldIndividually { get; set; }
+
+    [JsonPropertyName("weight")]
+    public string Weight { get; set; } = string.Empty;
+
+    [JsonPropertyName("shipping_required")]
+    public bool ShippingRequired { get; set; }
+
+    [JsonPropertyName("shipping_taxable")]
+    public bool ShippingTaxable { get; set; }
+
+    [JsonPropertyName("shipping_class")]
+    public string ShippingClass { get; set; } = string.Empty;
+
+    [JsonPropertyName("shipping_class_id")]
+    public int ShippingClassId { get; set; }
+
+    [JsonPropertyName("reviews_allowed")]
+    public bool ReviewsAllowed { get; set; }
+
+    [JsonPropertyName("average_rating")]
+    public string AverageRating { get; set; } = string.Empty;
+
+    [JsonPropertyName("rating_count")]
+    public int RatingCount { get; set; }
+
+    [JsonPropertyName("related_ids")]
+    public List<int> RelatedIds { get; set; } = [];
+
+    [JsonPropertyName("upsell_ids")]
+    public List<int> UpsellIds { get; set; } = [];
+
+    [JsonPropertyName("cross_sell_ids")]
+    public List<int> CrossSellIds { get; set; } = [];
+
+    [JsonPropertyName("parent_id")]
+    public int ParentId { get; set; }
+
+    [JsonPropertyName("purchase_note")]
+    public string PurchaseNote { get; set; } = string.Empty;
+
+    [JsonPropertyName("categories")]
+    public List<WooCommerceCategory> Categories { get; set; } = [];
+
+    [JsonPropertyName("tags")]
+    public List<WooCommerceTag> Tags { get; set; } = [];
+
+    [JsonPropertyName("images")]
+    public List<WooCommerceImage> Images { get; set; } = [];
+
+    [JsonPropertyName("attributes")]
+    public List<WooCommerceAttribute> Attributes { get; set; } = [];
+
+    [JsonPropertyName("variations")]
+    public List<int> Variations { get; set; } = [];
+
+    [JsonPropertyName("grouped_products")]
+    public List<int> GroupedProducts { get; set; } = [];
+
+    [JsonPropertyName("menu_order")]
+    public int MenuOrder { get; set; }
+
+    [JsonPropertyName("meta_data")]
+    public List<WooCommerceMetaData> MetaData { get; set; } = [];
+
+    [JsonPropertyName("date_created")]
+    public DateTime DateCreated { get; set; }
+
+    [JsonPropertyName("date_created_gmt")]
+    public DateTime DateCreatedGmt { get; set; }
+
+    [JsonPropertyName("date_modified")]
+    public DateTime DateModified { get; set; }
+
+    [JsonPropertyName("date_modified_gmt")]
+    public DateTime DateModifiedGmt { get; set; }
+}
+
+public class WooCommerceCategory
+{
+    [JsonPropertyName("id")]
+    public int Id { get; set; }
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("slug")]
+    public string Slug { get; set; } = string.Empty;
+}
+
+public class WooCommerceTag
+{
+    [JsonPropertyName("id")]
+    public int Id { get; set; }
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("slug")]
+    public string Slug { get; set; } = string.Empty;
+}
+
+public class WooCommerceImage
+{
+    [JsonPropertyName("id")]
+    public int Id { get; set; }
+
+    [JsonPropertyName("date_created")]
+    public DateTime DateCreated { get; set; }
+
+    [JsonPropertyName("date_created_gmt")]
+    public DateTime DateCreatedGmt { get; set; }
+
+    [JsonPropertyName("date_modified")]
+    public DateTime DateModified { get; set; }
+
+    [JsonPropertyName("date_modified_gmt")]
+    public DateTime DateModifiedGmt { get; set; }
+
+    [JsonPropertyName("src")]
+    public string Src { get; set; } = string.Empty;
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("alt")]
+    public string Alt { get; set; } = string.Empty;
+}
+
+public class WooCommerceAttribute
+{
+    [JsonPropertyName("id")]
+    public int Id { get; set; }
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("position")]
+    public int Position { get; set; }
+
+    [JsonPropertyName("visible")]
+    public bool Visible { get; set; }
+
+    [JsonPropertyName("variation")]
+    public bool Variation { get; set; }
+
+    [JsonPropertyName("options")]
+    public List<string> Options { get; set; } = [];
+}
+
+public class WooCommerceMetaData
+{
+    [JsonPropertyName("id")]
+    public int Id { get; set; }
+
+    [JsonPropertyName("key")]
+    public string Key { get; set; } = string.Empty;
+
+    [JsonPropertyName("value")]
+    public object Value { get; set; } = new();
 }

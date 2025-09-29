@@ -30,7 +30,7 @@
                     </MudText>
 
                     <MudGrid Class="mt-3">
-                        <MudItem xs="12" sm="6">
+                        <MudItem xs="12" sm="6" md="3">
                             <MudButton Variant="Variant.Filled"
                                       Color="Color.Primary"
                                       Size="Size.Large"
@@ -41,15 +41,34 @@
                                 @if (isSyncRunning)
                                 {
                                     <MudProgressCircular Class="ms-n1" Size="Size.Small" Indeterminate="true" />
-                                    <MudText Class="ms-2">Running SoftOne Sync...</MudText>
+                                    <MudText Class="ms-2" Style="color: white;">Running SoftOne Sync...</MudText>
                                 }
                                 else
                                 {
-                                    <MudText>SoftOne Sync</MudText>
+                                    <MudText Style="color: white;">SoftOne</MudText>
                                 }
                             </MudButton>
                         </MudItem>
-                        <MudItem xs="12" sm="6">
+                        <MudItem xs="12" sm="6" md="3">
+                            <MudButton Variant="Variant.Filled"
+                                      Color="Color.Success"
+                                      Size="Size.Large"
+                                      StartIcon="@Icons.Material.Filled.Storefront"
+                                      OnClick="@StartWooCommerceSync"
+                                      Disabled="@isWooCommerceSyncRunning"
+                                      FullWidth="true">
+                                @if (isWooCommerceSyncRunning)
+                                {
+                                    <MudProgressCircular Class="ms-n1" Size="Size.Small" Indeterminate="true" />
+                                    <MudText Class="ms-2" Style="color: white;">Running WooCommerce Sync...</MudText>
+                                }
+                                else
+                                {
+                                    <MudText Style="color: white;">panes.gr</MudText>
+                                }
+                            </MudButton>
+                        </MudItem>
+                        <MudItem xs="12" sm="6" md="3">
                             <MudButton Variant="Variant.Filled"
                                       Color="Color.Info"
                                       Size="Size.Large"
@@ -64,7 +83,26 @@
                                 }
                                 else
                                 {
-                                    <MudText>ATUM Sync</MudText>
+                                    <MudText Style="color: white;">ATUM</MudText>
+                                }
+                            </MudButton>
+                        </MudItem>
+                        <MudItem xs="12" sm="6" md="3">
+                            <MudButton Variant="Variant.Filled"
+                                      Color="Color.Secondary"
+                                      Size="Size.Large"
+                                      StartIcon="@Icons.Material.Filled.BatchPrediction"
+                                      OnClick="@StartAtumBatchSync"
+                                      Disabled="@isAtumBatchSyncRunning"
+                                      FullWidth="true">
+                                @if (isAtumBatchSyncRunning)
+                                {
+                                    <MudProgressCircular Class="ms-n1" Size="Size.Small" Indeterminate="true" />
+                                    <MudText Class="ms-2">Running ATUM Batch...</MudText>
+                                }
+                                else
+                                {
+                                    <MudText Style="color: white;">Sync</MudText>
                                 }
                             </MudButton>
                         </MudItem>
@@ -123,8 +161,57 @@
             </MudCard>
         </MudItem>
 
-        <!-- Statistics Card -->
-        <MudItem xs="12">
+        <!-- Source-based Statistics Card -->
+        <MudItem xs="12" md="6">
+            <MudCard>
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">
+                            <MudIcon Icon="Icons.Material.Filled.Analytics" Class="mr-2" />
+                            Products by Source
+                        </MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent>
+                    @if (productStatistics != null)
+                    {
+                        <MudGrid>
+                            <MudItem xs="12" Class="mb-3">
+                                <MudPaper Class="pa-3 text-center" Style="background-color: var(--mud-palette-primary);">
+                                    <MudText Typo="Typo.h3" Color="Color.Surface">@productStatistics.Total</MudText>
+                                    <MudText Typo="Typo.body1" Color="Color.Surface">Total Products</MudText>
+                                </MudPaper>
+                            </MudItem>
+                            <MudItem xs="4">
+                                <MudPaper Class="pa-3 text-center" Style="background-color: var(--mud-palette-success);">
+                                    <MudText Typo="Typo.h4" Color="Color.Surface">@productStatistics.BySources.SoftOne</MudText>
+                                    <MudText Typo="Typo.body2" Color="Color.Surface">SoftOne</MudText>
+                                </MudPaper>
+                            </MudItem>
+                            <MudItem xs="4">
+                                <MudPaper Class="pa-3 text-center" Style="background-color: var(--mud-palette-info);">
+                                    <MudText Typo="Typo.h4" Color="Color.Surface">@productStatistics.BySources.ATUM</MudText>
+                                    <MudText Typo="Typo.body2" Color="Color.Surface">ATUM</MudText>
+                                </MudPaper>
+                            </MudItem>
+                            <MudItem xs="4">
+                                <MudPaper Class="pa-3 text-center" Style="background-color: var(--mud-palette-tertiary);">
+                                    <MudText Typo="Typo.h4" Color="Color.Surface">@productStatistics.BySources.WooCommerce</MudText>
+                                    <MudText Typo="Typo.body2" Color="Color.Surface">WooCommerce</MudText>
+                                </MudPaper>
+                            </MudItem>
+                        </MudGrid>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">No source statistics available</MudText>
+                    }
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        <!-- Sync Status Statistics Card -->
+        <MudItem xs="12" md="6">
             <MudCard>
                 <MudCardHeader>
                     <CardHeaderContent>
@@ -138,26 +225,26 @@
                     @if (lastSyncLog != null)
                     {
                         <MudGrid>
-                            <MudItem xs="6" sm="3">
-                                <MudPaper Class="pa-4 text-center" Style="background-color: var(--mud-palette-success);">
+                            <MudItem xs="6" sm="6">
+                                <MudPaper Class="pa-3 text-center" Style="background-color: var(--mud-palette-success);">
                                     <MudText Typo="Typo.h4" Color="Color.Surface">@lastSyncLog.CreatedProducts</MudText>
                                     <MudText Typo="Typo.body2" Color="Color.Surface">Created</MudText>
                                 </MudPaper>
                             </MudItem>
-                            <MudItem xs="6" sm="3">
-                                <MudPaper Class="pa-4 text-center" Style="background-color: var(--mud-palette-info);">
+                            <MudItem xs="6" sm="6">
+                                <MudPaper Class="pa-3 text-center" Style="background-color: var(--mud-palette-info);">
                                     <MudText Typo="Typo.h4" Color="Color.Surface">@lastSyncLog.UpdatedProducts</MudText>
                                     <MudText Typo="Typo.body2" Color="Color.Surface">Updated</MudText>
                                 </MudPaper>
                             </MudItem>
-                            <MudItem xs="6" sm="3">
-                                <MudPaper Class="pa-4 text-center" Style="background-color: var(--mud-palette-warning);">
+                            <MudItem xs="6" sm="6">
+                                <MudPaper Class="pa-3 text-center" Style="background-color: var(--mud-palette-warning);">
                                     <MudText Typo="Typo.h4" Color="Color.Surface">@lastSyncLog.SkippedProducts</MudText>
                                     <MudText Typo="Typo.body2" Color="Color.Surface">Skipped</MudText>
                                 </MudPaper>
                             </MudItem>
-                            <MudItem xs="6" sm="3">
-                                <MudPaper Class="pa-4 text-center" Style="background-color: var(--mud-palette-error);">
+                            <MudItem xs="6" sm="6">
+                                <MudPaper Class="pa-3 text-center" Style="background-color: var(--mud-palette-error);">
                                     <MudText Typo="Typo.h4" Color="Color.Surface">@lastSyncLog.ErrorCount</MudText>
                                     <MudText Typo="Typo.body2" Color="Color.Surface">Errors</MudText>
                                 </MudPaper>
@@ -166,7 +253,56 @@
                     }
                     else
                     {
-                        <MudText Typo="Typo.body2" Color="Color.Secondary">No statistics available</MudText>
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">No sync statistics available</MudText>
+                    }
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        <!-- Integration Statistics Card -->
+        <MudItem xs="12">
+            <MudCard>
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">
+                            <MudIcon Icon="Icons.Material.Filled.Hub" Class="mr-2" />
+                            Integration Statistics
+                        </MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent>
+                    @if (productStatistics != null)
+                    {
+                        <MudGrid>
+                            <MudItem xs="6" sm="3">
+                                <MudPaper Class="pa-3 text-center" Style="background-color: var(--mud-palette-secondary);">
+                                    <MudText Typo="Typo.h4" Color="Color.Surface">@productStatistics.Integration.SoftOneAndATUM</MudText>
+                                    <MudText Typo="Typo.body2" Color="Color.Surface">SoftOne + ATUM</MudText>
+                                </MudPaper>
+                            </MudItem>
+                            <MudItem xs="6" sm="3">
+                                <MudPaper Class="pa-3 text-center" Style="background-color: var(--mud-palette-secondary);">
+                                    <MudText Typo="Typo.h4" Color="Color.Surface">@productStatistics.Integration.SoftOneAndWooCommerce</MudText>
+                                    <MudText Typo="Typo.body2" Color="Color.Surface">SoftOne + WooCommerce</MudText>
+                                </MudPaper>
+                            </MudItem>
+                            <MudItem xs="6" sm="3">
+                                <MudPaper Class="pa-3 text-center" Style="background-color: var(--mud-palette-secondary);">
+                                    <MudText Typo="Typo.h4" Color="Color.Surface">@productStatistics.Integration.ATUMAndWooCommerce</MudText>
+                                    <MudText Typo="Typo.body2" Color="Color.Surface">ATUM + WooCommerce</MudText>
+                                </MudPaper>
+                            </MudItem>
+                            <MudItem xs="6" sm="3">
+                                <MudPaper Class="pa-3 text-center" Style="background-color: var(--mud-palette-dark);">
+                                    <MudText Typo="Typo.h4" Color="Color.Surface">@productStatistics.Integration.AllThreeSources</MudText>
+                                    <MudText Typo="Typo.body2" Color="Color.Surface">All Three Sources</MudText>
+                                </MudPaper>
+                            </MudItem>
+                        </MudGrid>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">No integration statistics available</MudText>
                     }
                 </MudCardContent>
             </MudCard>

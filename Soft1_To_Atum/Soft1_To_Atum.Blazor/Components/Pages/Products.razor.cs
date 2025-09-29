@@ -10,6 +10,7 @@ public partial class Products : ComponentBase
     [Inject] private SyncApiClient SyncApi { get; set; } = null!;
     [Inject] private ISnackbar Snackbar { get; set; } = null!;
     [Inject] private ILogger<Products> Logger { get; set; } = null!;
+    [Inject] private IDialogService DialogService { get; set; } = null!;
 
     private List<ProductResponse> products = new();
     private List<ProductResponse> filteredProducts = new();
@@ -41,13 +42,13 @@ public partial class Products : ComponentBase
         try
         {
             loading = true;
-            Logger.LogDebug("Loading products from API");
+            Logger.LogDebug("Loading all products from API");
 
-            // Call the products API endpoint
-            var response = await SyncApi.GetProductsAsync();
-            if (response != null)
+            // Call the GetAllProductsAsync method to get all products
+            var allProducts = await SyncApi.GetAllProductsAsync();
+            if (allProducts != null)
             {
-                products = response.Products;
+                products = allProducts;
                 FilterProducts();
                 Logger.LogDebug("Loaded {ProductCount} products", products.Count);
                 Snackbar.Add($"Loaded {products.Count} products", Severity.Success);
@@ -56,17 +57,20 @@ public partial class Products : ComponentBase
             {
                 Logger.LogWarning("No products returned from API");
                 Snackbar.Add("No products found", Severity.Warning);
+                products = new List<ProductResponse>();
             }
         }
         catch (HttpRequestException ex)
         {
             Logger.LogError(ex, "HTTP error loading products: {Message}", ex.Message);
             Snackbar.Add("Failed to connect to API", Severity.Error);
+            products = new List<ProductResponse>();
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error loading products: {Message}", ex.Message);
             Snackbar.Add($"Error loading products: {ex.Message}", Severity.Error);
+            products = new List<ProductResponse>();
         }
         finally
         {
@@ -118,34 +122,35 @@ public partial class Products : ComponentBase
             Logger.LogDebug("Viewing product details for ID: {ProductId}", productResponse.Id);
 
             // Convert ProductResponse to Product for detailed view
-            // Note: This would ideally call a detailed API endpoint, but for now we'll create from available data
+            // Map all available data from ProductResponse to Product
             selectedProduct = new Product
             {
                 Id = productResponse.Id,
                 SoftOneId = productResponse.SoftOneId,
                 WooCommerceId = productResponse.WooCommerceId,
                 AtumId = productResponse.AtumId,
-                Name = productResponse.Name,
+                InternalId = productResponse.InternalId,
                 Sku = productResponse.Sku,
+                Barcode = productResponse.Barcode,
+                Name = productResponse.Name,
+                Category = productResponse.Category,
+                Unit = productResponse.Unit,
+                Group = productResponse.Group,
+                Vat = productResponse.Vat,
                 Price = productResponse.Price,
+                WholesalePrice = productResponse.WholesalePrice,
+                SalePrice = productResponse.SalePrice,
+                PurchasePrice = productResponse.PurchasePrice,
+                Discount = productResponse.Discount,
                 Quantity = productResponse.Quantity,
+                AtumQuantity = productResponse.AtumQuantity,
+                ImageData = productResponse.ImageData,
+                ZoomInfo = productResponse.ZoomInfo,
                 LastSyncedAt = productResponse.LastSyncedAt,
+                CreatedAt = productResponse.CreatedAt,
+                UpdatedAt = productResponse.UpdatedAt,
                 LastSyncStatus = productResponse.LastSyncStatus,
-                CreatedAt = DateTime.Now, // These would come from detailed API
-                UpdatedAt = DateTime.Now,
-                InternalId = "", // These would come from detailed API
-                Barcode = "",
-                Category = "",
-                Unit = "",
-                Group = "",
-                Vat = "",
-                WholesalePrice = null,
-                SalePrice = null,
-                PurchasePrice = null,
-                Discount = null,
-                ImageData = "",
-                ZoomInfo = "",
-                LastSyncError = null
+                LastSyncError = productResponse.LastSyncError
             };
 
             showProductDialog = true;
@@ -163,6 +168,52 @@ public partial class Products : ComponentBase
         // Placeholder for edit functionality
         Logger.LogInformation("Edit product requested for ID: {ProductId}", product.Id);
         Snackbar.Add("Edit functionality not yet implemented", Severity.Info);
+    }
+
+    private async Task DeleteAllProducts()
+    {
+        try
+        {
+            Logger.LogWarning("User requested to delete all products");
+
+            // Show simple confirmation with snackbar
+            var confirmed = await Task.FromResult(false); // Default to false for safety
+
+            // Use a simple JavaScript confirm dialog for now
+            var options = new DialogOptions() { CloseButton = true, MaxWidth = MaxWidth.Small };
+
+            var result = await DialogService.ShowMessageBox(
+                "Confirm Delete",
+                "⚠️ DANGER: This will permanently delete ALL products from the database. Are you sure?",
+                yesText: "Delete All",
+                cancelText: "Cancel");
+
+            if (result == true)
+            {
+                Snackbar.Add("Deleting all products...", Severity.Warning);
+                var success = await SyncApi.DeleteAllProductsAsync();
+
+                if (success)
+                {
+                    Snackbar.Add("All products deleted successfully", Severity.Success);
+                    // Refresh the products list
+                    await LoadProducts();
+                }
+                else
+                {
+                    Snackbar.Add("Failed to delete products", Severity.Error);
+                }
+            }
+            else
+            {
+                Snackbar.Add("Operation cancelled", Severity.Info);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error deleting all products: {Message}", ex.Message);
+            Snackbar.Add($"Error deleting products: {ex.Message}", Severity.Error);
+        }
     }
 
     private static Color GetStatusColor(string status)

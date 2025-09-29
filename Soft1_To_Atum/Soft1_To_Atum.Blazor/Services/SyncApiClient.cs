@@ -40,7 +40,7 @@ public class SyncApiClient
         });
     }
 
-    public async Task<ProductsPageResponse?> GetProductsAsync(int page = 1, int pageSize = 20)
+    public async Task<ProductsPageResponse?> GetProductsAsync(int page = 1, int pageSize = 1000)
     {
         var response = await _httpClient.GetAsync($"/api/products?page={page}&pageSize={pageSize}");
         response.EnsureSuccessStatusCode();
@@ -50,6 +50,42 @@ public class SyncApiClient
         {
             PropertyNameCaseInsensitive = true
         });
+    }
+
+    public async Task<List<ProductResponse>?> GetAllProductsAsync()
+    {
+        var allProducts = new List<ProductResponse>();
+        int page = 1;
+        const int pageSize = 100;
+        bool hasMoreData = true;
+
+        _logger.LogDebug("Loading all products from API with pagination");
+
+        while (hasMoreData)
+        {
+            try
+            {
+                var response = await GetProductsAsync(page, pageSize);
+                if (response?.Products?.Any() == true)
+                {
+                    allProducts.AddRange(response.Products);
+                    hasMoreData = response.Products.Count == pageSize && page < response.TotalPages;
+                    page++;
+                }
+                else
+                {
+                    hasMoreData = false;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error loading products page {Page}", page);
+                throw;
+            }
+        }
+
+        _logger.LogDebug("Loaded {TotalProducts} products from API", allProducts.Count);
+        return allProducts;
     }
 
     public async Task<List<StoreResponse>?> GetStoresAsync()
@@ -338,6 +374,176 @@ public class SyncApiClient
         {
             _logger.LogError(ex, "Error testing email configuration");
             return new ConnectionTestResponse { Success = false, Message = $"Error testing email: {ex.Message}" };
+        }
+    }
+
+    public async Task<ProductStatisticsResponse?> GetProductStatisticsAsync()
+    {
+        try
+        {
+            _logger.LogInformation("=== GET PRODUCT STATISTICS REQUEST ===");
+            _logger.LogInformation("Fetching product statistics from API: {BaseAddress}api/products/statistics", _httpClient.BaseAddress);
+
+            var response = await _httpClient.GetAsync("/api/products/statistics");
+            _logger.LogInformation("Product statistics API response: {StatusCode}", response.StatusCode);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                _logger.LogInformation("Product statistics retrieved successfully");
+
+                return JsonSerializer.Deserialize<ProductStatisticsResponse>(content, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                _logger.LogError("Failed to get product statistics: {StatusCode} - {ErrorContent}", response.StatusCode, errorContent);
+                return null;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting product statistics from API");
+            return null;
+        }
+    }
+
+    public async Task<ManualSyncResponse?> StartAtumBatchSyncAsync()
+    {
+        try
+        {
+            _logger.LogInformation("=== ATUM BATCH SYNC CLIENT REQUEST START ===");
+            _logger.LogInformation("HTTP Client BaseAddress: {BaseAddress}", _httpClient.BaseAddress);
+            _logger.LogInformation("Starting ATUM batch sync API call to /api/sync/atum-batch");
+
+            var response = await _httpClient.PostAsync("/api/sync/atum-batch", null);
+            _logger.LogInformation("ATUM batch sync API response status: {StatusCode}", response.StatusCode);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                _logger.LogInformation("ATUM batch sync API response content: {Content}", content);
+
+                var result = JsonSerializer.Deserialize<ManualSyncResponse>(content, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+
+                _logger.LogInformation("ATUM batch sync API call completed successfully. SyncLogId: {SyncLogId}", result?.SyncLogId);
+                _logger.LogInformation("=== ATUM BATCH SYNC CLIENT REQUEST SUCCESS ===");
+                return result;
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                _logger.LogError("ATUM batch sync API failed with status {StatusCode}: {ErrorContent}", response.StatusCode, errorContent);
+                throw new HttpRequestException($"ATUM batch sync failed: {response.StatusCode} - {errorContent}");
+            }
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "HTTP error during ATUM batch sync request to {BaseAddress}", _httpClient.BaseAddress);
+            throw new Exception($"Failed to connect to API service at {_httpClient.BaseAddress}. Error: {ex.Message}", ex);
+        }
+        catch (TaskCanceledException ex)
+        {
+            _logger.LogError(ex, "Timeout during ATUM batch sync request to {BaseAddress}", _httpClient.BaseAddress);
+            throw new Exception($"Request timed out connecting to API service at {_httpClient.BaseAddress}", ex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error during ATUM batch sync request");
+            throw new Exception($"Unexpected error during ATUM batch sync: {ex.Message}", ex);
+        }
+    }
+
+    public async Task<ManualSyncResponse?> StartWooCommerceSyncAsync()
+    {
+        try
+        {
+            _logger.LogInformation("=== WOOCOMMERCE SYNC CLIENT REQUEST START ===");
+            _logger.LogInformation("HTTP Client BaseAddress: {BaseAddress}", _httpClient.BaseAddress);
+            _logger.LogInformation("Starting WooCommerce sync API call to /api/sync/woocommerce");
+
+            var response = await _httpClient.PostAsync("/api/sync/woocommerce", null);
+            _logger.LogInformation("WooCommerce sync API response status: {StatusCode}", response.StatusCode);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                _logger.LogInformation("WooCommerce sync API response content: {Content}", content);
+
+                var result = JsonSerializer.Deserialize<ManualSyncResponse>(content, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+
+                _logger.LogInformation("WooCommerce sync API call completed successfully");
+                _logger.LogInformation("=== WOOCOMMERCE SYNC CLIENT REQUEST SUCCESS ===");
+                return result;
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                _logger.LogError("WooCommerce sync API failed with status {StatusCode}: {ErrorContent}", response.StatusCode, errorContent);
+                throw new HttpRequestException($"WooCommerce sync failed: {response.StatusCode} - {errorContent}");
+            }
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "HTTP error during WooCommerce sync request to {BaseAddress}", _httpClient.BaseAddress);
+            throw new Exception($"Failed to connect to API service at {_httpClient.BaseAddress}. Error: {ex.Message}", ex);
+        }
+        catch (TaskCanceledException ex)
+        {
+            _logger.LogError(ex, "Timeout during WooCommerce sync request to {BaseAddress}", _httpClient.BaseAddress);
+            throw new Exception($"Request timed out connecting to API service at {_httpClient.BaseAddress}", ex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error during WooCommerce sync request");
+            throw new Exception($"Unexpected error during WooCommerce sync: {ex.Message}", ex);
+        }
+    }
+
+    public async Task<bool> DeleteAllProductsAsync()
+    {
+        try
+        {
+            _logger.LogWarning("=== DELETE ALL PRODUCTS REQUEST ===");
+            _logger.LogWarning("⚠️ DANGER: Requesting deletion of ALL products from database");
+
+            var response = await _httpClient.DeleteAsync("/api/products/all");
+            _logger.LogInformation("Delete all products API response: {StatusCode}", response.StatusCode);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                _logger.LogInformation("Delete all products successful: {Content}", content);
+
+                // Parse the JSON response to get details
+                var jsonResponse = JsonSerializer.Deserialize<JsonElement>(content);
+                var deletedCount = jsonResponse.TryGetProperty("deletedCount", out var countElement)
+                    ? countElement.GetInt32()
+                    : 0;
+
+                _logger.LogWarning("Successfully deleted {DeletedCount} products from database", deletedCount);
+                return true;
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                _logger.LogError("Delete all products failed: {StatusCode} - {ErrorContent}", response.StatusCode, errorContent);
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting all products");
+            return false;
         }
     }
 }

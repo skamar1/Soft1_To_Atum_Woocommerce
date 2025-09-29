@@ -12,10 +12,13 @@ public partial class Home : ComponentBase
     [Inject] private ILogger<Home> Logger { get; set; } = null!;
 
     private bool isSyncRunning = false;
+    private bool isWooCommerceSyncRunning = false;
     private bool isAtumSyncRunning = false;
+    private bool isAtumBatchSyncRunning = false;
     private string lastSyncMessage = string.Empty;
     private Severity lastSyncSeverity = Severity.Info;
     private SyncLogResponse? lastSyncLog;
+    private ProductStatisticsResponse? productStatistics;
 
     protected override async Task OnInitializedAsync()
     {
@@ -79,6 +82,63 @@ public partial class Home : ComponentBase
         }
     }
 
+    private async Task StartWooCommerceSync()
+    {
+        if (isWooCommerceSyncRunning) return;
+
+        Logger.LogInformation("User initiated WooCommerce sync from dashboard");
+        isWooCommerceSyncRunning = true;
+        lastSyncMessage = "Starting WooCommerce synchronization...";
+        lastSyncSeverity = Severity.Info;
+        StateHasChanged();
+
+        try
+        {
+            var result = await SyncApi.StartWooCommerceSyncAsync();
+
+            if (result != null)
+            {
+                lastSyncMessage = result.Message;
+                lastSyncSeverity = Severity.Success;
+                Logger.LogInformation("WooCommerce sync completed successfully");
+
+                // Refresh dashboard to show updated statistics
+                await RefreshDashboard();
+
+                Snackbar.Add("WooCommerce sync completed successfully!", Severity.Success);
+            }
+            else
+            {
+                lastSyncMessage = "WooCommerce sync completed but no details were returned";
+                lastSyncSeverity = Severity.Warning;
+                Logger.LogWarning("WooCommerce sync returned null result");
+
+                Snackbar.Add("WooCommerce sync completed but response was empty", Severity.Warning);
+            }
+        }
+        catch (HttpRequestException ex)
+        {
+            lastSyncMessage = $"Connection error: {ex.Message}";
+            lastSyncSeverity = Severity.Error;
+            Logger.LogError(ex, "HTTP error during WooCommerce sync: {Message}", ex.Message);
+
+            Snackbar.Add("Failed to connect to sync service", Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            lastSyncMessage = $"WooCommerce sync failed: {ex.Message}";
+            lastSyncSeverity = Severity.Error;
+            Logger.LogError(ex, "Error during WooCommerce sync: {Message}", ex.Message);
+
+            Snackbar.Add($"WooCommerce sync failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            isWooCommerceSyncRunning = false;
+            StateHasChanged();
+        }
+    }
+
     private async Task StartAtumSync()
     {
         if (isAtumSyncRunning) return;
@@ -136,14 +196,77 @@ public partial class Home : ComponentBase
         }
     }
 
+    private async Task StartAtumBatchSync()
+    {
+        if (isAtumBatchSyncRunning) return;
+
+        Logger.LogInformation("User initiated ATUM batch sync from dashboard");
+        isAtumBatchSyncRunning = true;
+        lastSyncMessage = "Starting ATUM batch synchronization...";
+        lastSyncSeverity = Severity.Info;
+        StateHasChanged();
+
+        try
+        {
+            var result = await SyncApi.StartAtumBatchSyncAsync();
+
+            if (result != null)
+            {
+                lastSyncMessage = result.Message;
+                lastSyncSeverity = Severity.Success;
+                Logger.LogInformation("ATUM batch sync completed successfully. SyncLogId: {SyncLogId}", result.SyncLogId);
+
+                // Refresh dashboard to show updated statistics
+                await RefreshDashboard();
+
+                Snackbar.Add("ATUM batch sync completed successfully!", Severity.Success);
+            }
+            else
+            {
+                lastSyncMessage = "ATUM batch sync completed but no details were returned";
+                lastSyncSeverity = Severity.Warning;
+                Logger.LogWarning("ATUM batch sync returned null result");
+
+                Snackbar.Add("ATUM batch sync completed but response was empty", Severity.Warning);
+            }
+        }
+        catch (HttpRequestException ex)
+        {
+            lastSyncMessage = $"Connection error: {ex.Message}";
+            lastSyncSeverity = Severity.Error;
+            Logger.LogError(ex, "HTTP error during ATUM batch sync: {Message}", ex.Message);
+
+            Snackbar.Add("Failed to connect to sync service", Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            lastSyncMessage = $"ATUM batch sync failed: {ex.Message}";
+            lastSyncSeverity = Severity.Error;
+            Logger.LogError(ex, "Error during ATUM batch sync: {Message}", ex.Message);
+
+            Snackbar.Add($"ATUM batch sync failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            isAtumBatchSyncRunning = false;
+            StateHasChanged();
+        }
+    }
+
     private async Task RefreshDashboard()
     {
         try
         {
             Logger.LogDebug("Refreshing dashboard data");
 
-            // Load the most recent sync log
-            var syncLogs = await SyncApi.GetSyncLogsAsync(); // Get all sync logs
+            // Load the most recent sync log and product statistics in parallel
+            var syncLogsTask = SyncApi.GetSyncLogsAsync();
+            var statisticsTask = SyncApi.GetProductStatisticsAsync();
+
+            await Task.WhenAll(syncLogsTask, statisticsTask);
+
+            var syncLogs = await syncLogsTask;
+            productStatistics = await statisticsTask;
 
             if (syncLogs?.Any() == true)
             {
@@ -154,6 +277,16 @@ public partial class Home : ComponentBase
             {
                 lastSyncLog = null;
                 Logger.LogDebug("No sync logs found");
+            }
+
+            if (productStatistics != null)
+            {
+                Logger.LogDebug("Loaded product statistics: Total={Total}, SoftOne={SoftOne}, ATUM={ATUM}, WooCommerce={WooCommerce}",
+                    productStatistics.Total, productStatistics.BySources.SoftOne, productStatistics.BySources.ATUM, productStatistics.BySources.WooCommerce);
+            }
+            else
+            {
+                Logger.LogDebug("No product statistics available");
             }
 
             StateHasChanged();
