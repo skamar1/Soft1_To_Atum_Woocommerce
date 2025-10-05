@@ -95,6 +95,40 @@ public class EmailService
         }
     }
 
+    public async Task SendEmailAsync(string fromEmail, string toEmail, string subject, string body, AppSettings settings, bool isHtml = false, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(toEmail))
+            {
+                _logger.LogWarning("Cannot send email - no recipient email provided");
+                return;
+            }
+
+            _logger.LogDebug("Sending email to {ToEmail} with subject: {Subject}", toEmail, subject);
+
+            using var client = CreateSmtpClient(settings);
+
+            var message = new MailMessage
+            {
+                From = new MailAddress(fromEmail),
+                Subject = subject,
+                Body = body,
+                IsBodyHtml = isHtml
+            };
+
+            message.To.Add(toEmail);
+
+            await client.SendMailAsync(message, cancellationToken);
+            _logger.LogInformation("Email sent successfully to {ToEmail}", toEmail);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send email to {ToEmail}: {Message}", toEmail, ex.Message);
+            throw;
+        }
+    }
+
     private SmtpClient CreateSmtpClient(AppSettings settings)
     {
         var client = new SmtpClient(settings.EmailSmtpHost, settings.EmailSmtpPort)

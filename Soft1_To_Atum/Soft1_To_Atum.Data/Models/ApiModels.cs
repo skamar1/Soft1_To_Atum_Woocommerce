@@ -106,6 +106,22 @@ public class ManualSyncResponse
     public int SyncLogId { get; set; }
 }
 
+public class AtumBatchSingleSyncResponse
+{
+    public int Created { get; set; }
+    public int Updated { get; set; }
+    public int Errors { get; set; }
+    public bool HasMore { get; set; }
+    public List<DraftProductInfo> DraftProducts { get; set; } = [];
+}
+
+public class DraftProductInfo
+{
+    public string Sku { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public int WooCommerceId { get; set; }
+}
+
 public class ConnectionTestResponse
 {
     public bool Success { get; set; }
@@ -146,17 +162,31 @@ public class ProductIntegrationStatistics
 // ATUM Batch Operation Models
 public class AtumBatchRequest
 {
+    [JsonPropertyName("create")]
     public List<AtumBatchCreateItem> Create { get; set; } = new();
+
+    [JsonPropertyName("update")]
     public List<AtumBatchUpdateItem> Update { get; set; } = new();
+
+    [JsonPropertyName("delete")]
     public List<int> Delete { get; set; } = new();
 }
 
 public class AtumBatchCreateItem
 {
+    [JsonPropertyName("product_id")]
     public int ProductId { get; set; }
+
+    [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("is_main")]
     public bool IsMain { get; set; } = false;
+
+    [JsonPropertyName("location")]
     public List<int> Location { get; set; } = new();
+
+    [JsonPropertyName("meta_data")]
     public AtumBatchMetaData MetaData { get; set; } = new();
 }
 
@@ -165,44 +195,79 @@ public class AtumBatchUpdateItem
     [JsonPropertyName("id")]
     public int Id { get; set; }
 
+    [JsonPropertyName("meta_data")]
+    public AtumBatchUpdateMetaData MetaData { get; set; } = new();
+}
+
+public class AtumBatchUpdateMetaData
+{
     [JsonPropertyName("stock_quantity")]
     public decimal StockQuantity { get; set; }
 }
 
 public class AtumBatchMetaData
 {
+    [JsonPropertyName("sku")]
     public string Sku { get; set; } = string.Empty;
+
+    [JsonPropertyName("manage_stock")]
     public bool ManageStock { get; set; } = true;
+
+    [JsonPropertyName("stock_quantity")]
     public decimal StockQuantity { get; set; }
+
+    [JsonPropertyName("backorders")]
     public bool Backorders { get; set; } = false;
+
+    [JsonPropertyName("stock_status")]
     public string StockStatus { get; set; } = string.Empty;
+
+    [JsonPropertyName("barcode")]
     public string Barcode { get; set; } = string.Empty;
 }
 
 public class AtumBatchResponse
 {
+    [JsonPropertyName("create")]
     public List<AtumBatchResponseItem> Create { get; set; } = new();
+
+    [JsonPropertyName("update")]
     public List<AtumBatchResponseItem> Update { get; set; } = new();
+
+    [JsonPropertyName("delete")]
     public List<AtumBatchResponseItem> Delete { get; set; } = new();
 }
 
 public class AtumBatchResponseItem
 {
+    [JsonPropertyName("id")]
     public int Id { get; set; }
+
+    [JsonPropertyName("error")]
     public AtumBatchError? Error { get; set; }
+
+    [JsonPropertyName("product_id")]
     public int ProductId { get; set; }
+
+    [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
 }
 
 public class AtumBatchError
 {
+    [JsonPropertyName("code")]
     public string Code { get; set; } = string.Empty;
+
+    [JsonPropertyName("message")]
     public string Message { get; set; } = string.Empty;
+
+    [JsonPropertyName("data")]
     public AtumBatchErrorData? Data { get; set; }
 }
 
 public class AtumBatchErrorData
 {
+    [JsonPropertyName("status")]
     public int Status { get; set; }
 }
 
@@ -220,6 +285,21 @@ public class AtumBatchStats
     public int Updated { get; set; }
     public int Errors { get; set; }
     public int Skipped { get; set; }
+}
+
+public class FullSyncResponse
+{
+    public bool Success { get; set; }
+    public int TotalProducts { get; set; }
+    public int ProductsChecked { get; set; }
+    public int MatchedInWooCommerce { get; set; }
+    public int CreatedInWooCommerce { get; set; }
+    public int CreatedInAtum { get; set; }
+    public int UpdatedInAtum { get; set; }
+    public int Errors { get; set; }
+    public int AtumErrors { get; set; }
+    public int AtumUpdateErrors { get; set; }
+    public string Message { get; set; } = string.Empty;
 }
 
 // API Models για Settings
@@ -690,16 +770,16 @@ public class WooCommerceProduct
     public List<WooCommerceMetaData> MetaData { get; set; } = [];
 
     [JsonPropertyName("date_created")]
-    public DateTime DateCreated { get; set; }
+    public DateTime? DateCreated { get; set; }
 
     [JsonPropertyName("date_created_gmt")]
-    public DateTime DateCreatedGmt { get; set; }
+    public DateTime? DateCreatedGmt { get; set; }
 
     [JsonPropertyName("date_modified")]
-    public DateTime DateModified { get; set; }
+    public DateTime? DateModified { get; set; }
 
     [JsonPropertyName("date_modified_gmt")]
-    public DateTime DateModifiedGmt { get; set; }
+    public DateTime? DateModifiedGmt { get; set; }
 }
 
 public class WooCommerceCategory
@@ -732,16 +812,16 @@ public class WooCommerceImage
     public int Id { get; set; }
 
     [JsonPropertyName("date_created")]
-    public DateTime DateCreated { get; set; }
+    public DateTime? DateCreated { get; set; }
 
     [JsonPropertyName("date_created_gmt")]
-    public DateTime DateCreatedGmt { get; set; }
+    public DateTime? DateCreatedGmt { get; set; }
 
     [JsonPropertyName("date_modified")]
-    public DateTime DateModified { get; set; }
+    public DateTime? DateModified { get; set; }
 
     [JsonPropertyName("date_modified_gmt")]
-    public DateTime DateModifiedGmt { get; set; }
+    public DateTime? DateModifiedGmt { get; set; }
 
     [JsonPropertyName("src")]
     public string Src { get; set; } = string.Empty;
@@ -784,4 +864,46 @@ public class WooCommerceMetaData
 
     [JsonPropertyName("value")]
     public object Value { get; set; } = new();
+}
+
+// Background job response models
+public class BackgroundJobStartResponse
+{
+    public bool Success { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public string JobId { get; set; } = string.Empty;
+}
+
+public class BackgroundJobStatusResponse
+{
+    public string Id { get; set; } = string.Empty;
+    public string Type { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+    public DateTime? StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public string? ErrorMessage { get; set; }
+    public string? Result { get; set; }
+    public int TotalSteps { get; set; }
+    public int CompletedSteps { get; set; }
+    public string CurrentStep { get; set; } = string.Empty;
+    public double ProgressPercentage { get; set; }
+}
+
+public class EmailTestResponse
+{
+    public bool Success { get; set; }
+    public string Message { get; set; } = string.Empty;
+}
+
+// WooCommerce Page Sync Response
+public class WooCommercePageSyncResponse
+{
+    public bool Success { get; set; }
+    public int Page { get; set; }
+    public int ProductsFetched { get; set; }
+    public int ProductsCreated { get; set; }
+    public int ProductsSkipped { get; set; }
+    public bool HasMore { get; set; }
+    public string Message { get; set; } = string.Empty;
 }

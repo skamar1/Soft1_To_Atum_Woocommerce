@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using Soft1_To_Atum.ApiService.Extensions;
@@ -9,7 +10,12 @@ using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.AddServiceDefaults();
+// Add only the services we need from ServiceDefaults, WITHOUT the automatic resilience handlers
+// that add 10-second timeouts to all HttpClients
+builder.ConfigureOpenTelemetry();
+builder.AddDefaultHealthChecks();
+builder.Services.AddServiceDiscovery();
+
 builder.Services.AddDbContext<SyncDbContext>(options =>
     options.UseSqlite("Data Source=sync.db"));
 
@@ -21,13 +27,36 @@ builder.Services.AddScoped<WooCommerceApiService>();
 builder.Services.AddScoped<EmailService>();
 builder.Services.AddScoped<ProductMatchingService>();
 builder.Services.AddScoped<IWooCommerceAtumClient, WooCommerceAtumClient>();
-builder.Services.AddScoped<Soft1_To_Atum.ApiService.Services.AtumBatchService>();
 builder.Services.AddHttpClient();
 
-// Configure specific HttpClient for WooCommerce with longer timeout
+// Configure specific HttpClient for WooCommerce with very extended timeout
 builder.Services.AddHttpClient<WooCommerceApiService>(client =>
 {
-    client.Timeout = TimeSpan.FromMinutes(5); // 5 minutes timeout for WooCommerce API
+    client.Timeout = TimeSpan.FromMinutes(20); // 20 minutes total timeout for very slow WooCommerce API
+})
+.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+    PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
+    ConnectTimeout = TimeSpan.FromSeconds(30)
+})
+.AddStandardResilienceHandler(options =>
+{
+    // Minimal retry - we handle pagination manually
+    options.Retry.MaxRetryAttempts = 1;
+    options.Retry.Delay = TimeSpan.FromSeconds(2);
+
+    // Very long timeout for each attempt (one page can take up to 10 minutes!)
+    options.AttemptTimeout.Timeout = TimeSpan.FromMinutes(10);
+
+    // Total timeout must cover the entire request
+    options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(15);
+
+    // Configure circuit breaker (sampling must be at least 2x attempt timeout)
+    options.CircuitBreaker.SamplingDuration = TimeSpan.FromMinutes(20);
+    options.CircuitBreaker.FailureRatio = 0.99; // Almost never break - server is just slow
+    options.CircuitBreaker.MinimumThroughput = 10;
+    options.CircuitBreaker.BreakDuration = TimeSpan.FromMinutes(1);
 });
 
 builder.Services.AddProblemDetails();
@@ -187,6 +216,772 @@ syncGroup.MapGet("/status", async (SyncDbContext db) =>
 .WithSummary("Get current sync status and statistics")
 .WithDescription("Retrieves the current synchronization status, last sync information, and product statistics");
 
+// Βήμα 1+2+3: Διάβασμα από βάση + WooCommerce matching/creation + ATUM creation
+syncGroup.MapGet("/test-read-products", async (
+    SyncDbContext db,
+    WooCommerceApiService wooCommerceService,
+    AtumApiService atumApiService,
+    SettingsService settingsService,
+    ILogger<Program> logger,
+    CancellationToken cancellationToken) =>
+{
+    logger.LogInformation("=== Full Sync: DB → WooCommerce → ATUM (Create + Update) ===");
+
+    try
+    {
+        // 1. Διαβάζουμε όλα τα προϊόντα από τη βάση
+        var allProducts = await db.Products.ToListAsync(cancellationToken);
+        logger.LogInformation("Read {Count} products from database", allProducts.Count);
+
+        // 2. Βρίσκουμε προϊόντα χωρίς WooCommerce ID
+        var productsWithoutWooId = allProducts.Where(p => string.IsNullOrEmpty(p.WooCommerceId)).ToList();
+        logger.LogInformation("Found {Count} products without WooCommerce ID", productsWithoutWooId.Count);
+
+        // 3. Get settings για WooCommerce credentials
+        var settings = await settingsService.GetAppSettingsAsync();
+        if (settings == null || string.IsNullOrEmpty(settings.WooCommerceConsumerKey))
+        {
+            logger.LogWarning("WooCommerce credentials not configured, skipping WooCommerce matching");
+            return Results.Ok(new
+            {
+                Success = true,
+                TotalProducts = allProducts.Count,
+                ProductsChecked = 0,
+                MatchedInWooCommerce = 0,
+                CreatedInWooCommerce = 0,
+                Errors = 0,
+                Message = "WooCommerce credentials not configured",
+                SampleProducts = allProducts.Take(10).Select(p => new
+                {
+                    p.Id,
+                    p.Name,
+                    p.Sku,
+                    p.InternalId,
+                    p.WooCommerceId,
+                    p.AtumId,
+                    SoftOneQuantity = p.Quantity,
+                    AtumQuantity = p.AtumQuantity,
+                    p.Price
+                }).ToList()
+            });
+        }
+
+        // 4. Παράλληλα requests στο WooCommerce (max 10 ταυτόχρονα)
+        int matchedCount = 0;
+        int createdCount = 0;
+        int errorCount = 0;
+        var semaphore = new SemaphoreSlim(10, 10);
+        var tasks = new List<Task>();
+
+        foreach (var product in productsWithoutWooId)
+        {
+            if (string.IsNullOrEmpty(product.Sku))
+            {
+                logger.LogWarning("Product {Name} has no SKU, skipping", product.Name);
+                errorCount++;
+                continue;
+            }
+
+            tasks.Add(Task.Run(async () =>
+            {
+                await semaphore.WaitAsync(cancellationToken);
+                try
+                {
+                    // Ψάχνουμε στο WooCommerce με SKU
+                    var wooProduct = await wooCommerceService.GetProductBySkuAsync(
+                        settings.WooCommerceConsumerKey,
+                        settings.WooCommerceConsumerSecret,
+                        product.Sku,
+                        cancellationToken);
+
+                    if (wooProduct != null && wooProduct.Id > 0)
+                    {
+                        // Βρέθηκε - ενημερώνουμε τη βάση
+                        product.WooCommerceId = wooProduct.Id.ToString();
+                        product.UpdatedAt = DateTime.UtcNow;
+                        product.LastSyncStatus = "Matched in WooCommerce";
+                        Interlocked.Increment(ref matchedCount);
+                        logger.LogInformation("Matched product {Name} (SKU: {Sku}) -> WooCommerce ID: {WooId}",
+                            product.Name, product.Sku, wooProduct.Id);
+                    }
+                    else
+                    {
+                        // Δεν βρέθηκε - δημιουργούμε draft
+                        logger.LogInformation("Creating draft product in WooCommerce: {Name} (SKU: {Sku})",
+                            product.Name, product.Sku);
+
+                        var newProduct = await wooCommerceService.CreateProductAsync(
+                            settings.WooCommerceConsumerKey,
+                            settings.WooCommerceConsumerSecret,
+                            product.Name,
+                            product.Sku,
+                            product.Price,
+                            cancellationToken);
+
+                        if (newProduct != null && newProduct.Id > 0)
+                        {
+                            product.WooCommerceId = newProduct.Id.ToString();
+                            product.UpdatedAt = DateTime.UtcNow;
+                            product.LastSyncStatus = "Created as draft in WooCommerce";
+                            Interlocked.Increment(ref createdCount);
+                            logger.LogInformation("Created draft product {Name} -> WooCommerce ID: {WooId}",
+                                product.Name, newProduct.Id);
+                        }
+                        else
+                        {
+                            product.LastSyncStatus = "Error - Failed to create in WooCommerce";
+                            Interlocked.Increment(ref errorCount);
+                            logger.LogWarning("Failed to create product {Name} in WooCommerce", product.Name);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Error processing product {Name} (SKU: {Sku})", product.Name, product.Sku);
+                    product.LastSyncStatus = $"Error - {ex.Message}";
+                    Interlocked.Increment(ref errorCount);
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            }, cancellationToken));
+        }
+
+        // Περιμένουμε όλα τα tasks να ολοκληρωθούν
+        await Task.WhenAll(tasks);
+
+        // 5. Αποθηκεύουμε τις αλλαγές στη βάση (WooCommerce matching)
+        await db.SaveChangesAsync(cancellationToken);
+        logger.LogInformation("Saved WooCommerce changes to database");
+
+        // 6. ATUM Creation: Δημιουργία προϊόντων στο ATUM
+        logger.LogInformation("=== Starting ATUM product creation ===");
+        int createdInAtum = 0;
+        int atumErrors = 0;
+
+        // Βρίσκουμε προϊόντα με WooCommerceId αλλά χωρίς AtumId
+        var productsForAtum = allProducts
+            .Where(p => !string.IsNullOrEmpty(p.WooCommerceId) && string.IsNullOrEmpty(p.AtumId))
+            .ToList();
+
+        logger.LogInformation("Found {Count} products to create in ATUM", productsForAtum.Count);
+
+        if (productsForAtum.Any())
+        {
+            try
+            {
+                // Σπάμε σε batches των 50 items για να μην υπερφορτώσουμε το ATUM API
+                const int batchSize = 50;
+                int totalBatches = (int)Math.Ceiling((double)productsForAtum.Count / batchSize);
+
+                logger.LogInformation("Processing {TotalProducts} products in {TotalBatches} batches of {BatchSize} items each",
+                    productsForAtum.Count, totalBatches, batchSize);
+
+                for (int batchIndex = 0; batchIndex < totalBatches; batchIndex++)
+                {
+                    var currentBatchProducts = productsForAtum
+                        .Skip(batchIndex * batchSize)
+                        .Take(batchSize)
+                        .ToList();
+
+                    logger.LogInformation("=== Processing ATUM Batch {CurrentBatch}/{TotalBatches} with {Count} products ===",
+                        batchIndex + 1, totalBatches, currentBatchProducts.Count);
+
+                    // Δημιουργούμε το batch request για ATUM
+                    var batchRequest = new AtumBatchRequest();
+
+                    foreach (var product in currentBatchProducts)
+                    {
+                        if (!int.TryParse(product.WooCommerceId, out int wooCommerceProductId))
+                        {
+                            logger.LogWarning("Invalid WooCommerce ID for product {Name}: {WooId}", product.Name, product.WooCommerceId);
+                            atumErrors++;
+                            continue;
+                        }
+
+                        var createItem = new AtumBatchCreateItem
+                        {
+                            ProductId = wooCommerceProductId,
+                            Name = settings.AtumLocationName ?? "store1_location", // Location name, not product name
+                            IsMain = false,
+                            Location = new List<int> { settings.AtumLocationId },
+                            MetaData = new AtumBatchMetaData
+                            {
+                                Sku = product.Sku ?? "",
+                                ManageStock = true,
+                                StockQuantity = product.Quantity, // Ποσότητα από SoftOne
+                                Backorders = false,
+                                StockStatus = product.Quantity > 0 ? "instock" : "outofstock",
+                                Barcode = product.Barcode ?? ""
+                            }
+                        };
+
+                        batchRequest.Create.Add(createItem);
+                    }
+
+                    if (batchRequest.Create.Any())
+                    {
+                        logger.LogInformation("Sending ATUM batch {BatchNum} with {Count} items to API",
+                            batchIndex + 1, batchRequest.Create.Count);
+
+                        try
+                        {
+                            // Καλούμε το ATUM API
+                            var batchResponse = await atumApiService.BatchUpdateInventoryAsync(
+                                settings.WooCommerceConsumerKey,
+                                settings.WooCommerceConsumerSecret,
+                                batchRequest,
+                                cancellationToken);
+
+                            logger.LogInformation("ATUM API returned response for batch {BatchNum}. Create count: {CreateCount}",
+                                batchIndex + 1, batchResponse.Create?.Count ?? 0);
+
+                            // Ενημερώνουμε τη βάση με τα ATUM IDs
+                            if (batchResponse.Create != null && batchResponse.Create.Any())
+                            {
+                                foreach (var createdItem in batchResponse.Create)
+                                {
+                                    if (createdItem.Error != null)
+                                    {
+                                        logger.LogError("ATUM creation error for product {ProductId}: {ErrorCode} - {ErrorMessage}",
+                                            createdItem.ProductId, createdItem.Error.Code, createdItem.Error.Message);
+                                        atumErrors++;
+                                        continue;
+                                    }
+
+                                    // Βρίσκουμε το προϊόν στη βάση με WooCommerceId
+                                    var product = allProducts.FirstOrDefault(p => p.WooCommerceId == createdItem.ProductId.ToString());
+                                    if (product != null)
+                                    {
+                                        product.AtumId = createdItem.Id.ToString();
+                                        product.AtumQuantity = product.Quantity; // Ενημέρωση με την ποσότητα που στείλαμε
+                                        product.UpdatedAt = DateTime.UtcNow;
+                                        product.LastSyncedAt = DateTime.UtcNow;
+                                        product.LastSyncStatus = "Created in ATUM";
+                                        createdInAtum++;
+
+                                        logger.LogDebug("Created in ATUM: {Name} (WooCommerce ID: {WooId}) -> ATUM ID: {AtumId}",
+                                            product.Name, product.WooCommerceId, createdItem.Id);
+                                    }
+                                    else
+                                    {
+                                        logger.LogWarning("Product with WooCommerce ID {WooId} not found in database after ATUM creation",
+                                            createdItem.ProductId);
+                                    }
+                                }
+
+                                // Αποθηκεύουμε τις αλλαγές στη βάση μετά από κάθε batch
+                                await db.SaveChangesAsync(cancellationToken);
+                                logger.LogInformation("Batch {BatchNum} completed: {Created} created in this batch. Total so far: {TotalCreated} created, {TotalErrors} errors",
+                                    batchIndex + 1, batchResponse.Create.Count, createdInAtum, atumErrors);
+                            }
+                            else
+                            {
+                                logger.LogWarning("ATUM API returned empty or null Create list for batch {BatchNum}", batchIndex + 1);
+                            }
+                        }
+                        catch (Exception batchEx)
+                        {
+                            logger.LogError(batchEx, "Error processing ATUM batch {BatchNum}: {Message}",
+                                batchIndex + 1, batchEx.Message);
+                            atumErrors += currentBatchProducts.Count;
+                        }
+
+                        // Μικρή καθυστέρηση μεταξύ batches για να μην υπερφορτώσουμε το API
+                        if (batchIndex < totalBatches - 1)
+                        {
+                            await Task.Delay(500, cancellationToken);
+                        }
+                    }
+                }
+
+                logger.LogInformation("=== ATUM batch processing completed: {TotalCreated} total created, {TotalErrors} total errors ===",
+                    createdInAtum, atumErrors);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error during ATUM batch creation");
+                atumErrors += productsForAtum.Count - createdInAtum;
+            }
+        }
+
+        // 7. ATUM Update: Ενημέρωση ποσοτήτων για προϊόντα με όλα τα IDs
+        logger.LogInformation("=== Starting ATUM quantity update ===");
+        int updatedInAtum = 0;
+        int atumUpdateErrors = 0;
+
+        // Βρίσκουμε προϊόντα που έχουν όλα τα IDs (SoftOne/Internal, WooCommerce, ATUM)
+        var productsForAtumUpdate = allProducts
+            .Where(p => (!string.IsNullOrEmpty(p.SoftOneId) || !string.IsNullOrEmpty(p.InternalId)) &&
+                       !string.IsNullOrEmpty(p.WooCommerceId) &&
+                       !string.IsNullOrEmpty(p.AtumId))
+            .ToList();
+
+        logger.LogInformation("Found {Count} products to update in ATUM", productsForAtumUpdate.Count);
+
+        if (productsForAtumUpdate.Any())
+        {
+            try
+            {
+                // Σπάμε σε batches των 50 items
+                const int batchSize = 50;
+                int totalBatches = (int)Math.Ceiling((double)productsForAtumUpdate.Count / batchSize);
+
+                logger.LogInformation("Processing {TotalProducts} products in {TotalBatches} update batches of {BatchSize} items each",
+                    productsForAtumUpdate.Count, totalBatches, batchSize);
+
+                for (int batchIndex = 0; batchIndex < totalBatches; batchIndex++)
+                {
+                    var currentBatchProducts = productsForAtumUpdate
+                        .Skip(batchIndex * batchSize)
+                        .Take(batchSize)
+                        .ToList();
+
+                    logger.LogInformation("=== Processing ATUM Update Batch {CurrentBatch}/{TotalBatches} with {Count} products ===",
+                        batchIndex + 1, totalBatches, currentBatchProducts.Count);
+
+                    // Δημιουργούμε το batch update request για ATUM
+                    var batchRequest = new AtumBatchRequest();
+
+                    foreach (var product in currentBatchProducts)
+                    {
+                        if (!int.TryParse(product.AtumId, out int atumInventoryId))
+                        {
+                            logger.LogWarning("Invalid ATUM ID for product {Name}: {AtumId}", product.Name, product.AtumId);
+                            atumUpdateErrors++;
+                            continue;
+                        }
+
+                        var updateItem = new AtumBatchUpdateItem
+                        {
+                            Id = atumInventoryId,
+                            MetaData = new AtumBatchUpdateMetaData
+                            {
+                                StockQuantity = product.Quantity // Ποσότητα από SoftOne
+                            }
+                        };
+
+                        batchRequest.Update.Add(updateItem);
+                    }
+
+                    if (batchRequest.Update.Any())
+                    {
+                        logger.LogInformation("Sending ATUM update batch {BatchNum} with {Count} items to API",
+                            batchIndex + 1, batchRequest.Update.Count);
+
+                        try
+                        {
+                            // Καλούμε το ATUM API
+                            var batchResponse = await atumApiService.BatchUpdateInventoryAsync(
+                                settings.WooCommerceConsumerKey,
+                                settings.WooCommerceConsumerSecret,
+                                batchRequest,
+                                cancellationToken);
+
+                            logger.LogInformation("ATUM API returned update response for batch {BatchNum}. Update count: {UpdateCount}",
+                                batchIndex + 1, batchResponse.Update?.Count ?? 0);
+
+                            // Ενημερώνουμε τη βάση
+                            if (batchResponse.Update != null && batchResponse.Update.Any())
+                            {
+                                foreach (var updatedItem in batchResponse.Update)
+                                {
+                                    if (updatedItem.Error != null)
+                                    {
+                                        logger.LogError("ATUM update error for inventory {InventoryId}: {ErrorCode} - {ErrorMessage}",
+                                            updatedItem.Id, updatedItem.Error.Code, updatedItem.Error.Message);
+                                        atumUpdateErrors++;
+                                        continue;
+                                    }
+
+                                    // Βρίσκουμε το προϊόν στη βάση με AtumId
+                                    var product = allProducts.FirstOrDefault(p => p.AtumId == updatedItem.Id.ToString());
+                                    if (product != null)
+                                    {
+                                        product.AtumQuantity = product.Quantity; // Sync με την ποσότητα που στείλαμε
+                                        product.UpdatedAt = DateTime.UtcNow;
+                                        product.LastSyncedAt = DateTime.UtcNow;
+                                        product.LastSyncStatus = "ATUM: Quantity updated";
+                                        updatedInAtum++;
+
+                                        logger.LogDebug("Updated ATUM quantity: {Name} (ATUM ID: {AtumId}) -> Quantity: {Quantity}",
+                                            product.Name, product.AtumId, product.Quantity);
+                                    }
+                                    else
+                                    {
+                                        logger.LogWarning("Product with ATUM ID {AtumId} not found in database after update",
+                                            updatedItem.Id);
+                                    }
+                                }
+
+                                // Αποθηκεύουμε τις αλλαγές στη βάση μετά από κάθε batch
+                                await db.SaveChangesAsync(cancellationToken);
+                                logger.LogInformation("Update batch {BatchNum} completed: {Updated} updated in this batch. Total so far: {TotalUpdated} updated, {TotalErrors} errors",
+                                    batchIndex + 1, batchResponse.Update.Count, updatedInAtum, atumUpdateErrors);
+                            }
+                            else
+                            {
+                                logger.LogWarning("ATUM API returned empty or null Update list for batch {BatchNum}", batchIndex + 1);
+                            }
+                        }
+                        catch (Exception batchEx)
+                        {
+                            logger.LogError(batchEx, "Error processing ATUM update batch {BatchNum}: {Message}",
+                                batchIndex + 1, batchEx.Message);
+                            atumUpdateErrors += currentBatchProducts.Count;
+                        }
+
+                        // Μικρή καθυστέρηση μεταξύ batches
+                        if (batchIndex < totalBatches - 1)
+                        {
+                            await Task.Delay(500, cancellationToken);
+                        }
+                    }
+                }
+
+                logger.LogInformation("=== ATUM update processing completed: {TotalUpdated} total updated, {TotalErrors} total errors ===",
+                    updatedInAtum, atumUpdateErrors);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error during ATUM batch update");
+                atumUpdateErrors += productsForAtumUpdate.Count - updatedInAtum;
+            }
+        }
+
+        // 8. Επιστροφή αποτελεσμάτων
+        var sampleProducts = allProducts.Take(10).Select(p => new
+        {
+            p.Id,
+            p.Name,
+            p.Sku,
+            p.InternalId,
+            p.WooCommerceId,
+            p.AtumId,
+            SoftOneQuantity = p.Quantity,
+            AtumQuantity = p.AtumQuantity,
+            p.Price,
+            p.LastSyncStatus
+        }).ToList();
+
+        return Results.Ok(new
+        {
+            Success = true,
+            TotalProducts = allProducts.Count,
+            ProductsChecked = productsWithoutWooId.Count,
+            MatchedInWooCommerce = matchedCount,
+            CreatedInWooCommerce = createdCount,
+            CreatedInAtum = createdInAtum,
+            UpdatedInAtum = updatedInAtum,
+            Errors = errorCount,
+            AtumErrors = atumErrors,
+            AtumUpdateErrors = atumUpdateErrors,
+            Message = $"WooCommerce: {matchedCount} matched, {createdCount} created, {errorCount} errors | ATUM: {createdInAtum} created, {updatedInAtum} updated, {atumErrors + atumUpdateErrors} total errors",
+            SampleProducts = sampleProducts
+        });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Error during product sync");
+        return Results.Problem($"Error: {ex.Message}");
+    }
+})
+.WithName("TestReadProducts")
+.WithSummary("Ολοκληρωμένος συγχρονισμός: DB → WooCommerce → ATUM (Create + Update)")
+.WithDescription("Βήμα 1: Διαβάζει προϊόντα από βάση | Βήμα 2: Ψάχνει στο WooCommerce με SKU και δημιουργεί draft για νέα | Βήμα 3: Δημιουργεί inventory στο ATUM για προϊόντα με WooCommerce ID | Βήμα 4: Ενημερώνει ποσότητες στο ATUM για προϊόντα με όλα τα IDs");
+
+// ATUM Sync: Διάβασμα από ATUM API και ενημέρωση βάσης
+syncGroup.MapPost("/atum", async (
+    SyncDbContext db,
+    AtumApiService atumApiService,
+    SettingsService settingsService,
+    ILogger<Program> logger,
+    CancellationToken cancellationToken) =>
+{
+    logger.LogInformation("=== ATUM SYNC: Reading from ATUM API and updating database ===");
+
+    try
+    {
+        // 1. Get settings
+        var settings = await settingsService.GetAppSettingsAsync();
+        if (settings == null)
+        {
+            logger.LogError("Settings not found");
+            return Results.Problem("Settings not configured");
+        }
+
+        if (string.IsNullOrEmpty(settings.WooCommerceConsumerKey) || string.IsNullOrEmpty(settings.WooCommerceConsumerSecret))
+        {
+            logger.LogError("WooCommerce credentials not configured");
+            return Results.Problem("WooCommerce credentials not configured");
+        }
+
+        // 2. Fetch all ATUM inventory
+        logger.LogInformation("Fetching all ATUM inventory for location {LocationId}", settings.AtumLocationId);
+        var atumItems = await atumApiService.GetAllInventoryAsync(
+            settings.WooCommerceConsumerKey,
+            settings.WooCommerceConsumerSecret,
+            settings.AtumLocationId,
+            cancellationToken);
+
+        logger.LogInformation("Retrieved {Count} items from ATUM API", atumItems.Count);
+
+        if (atumItems.Count == 0)
+        {
+            return Results.Ok(new
+            {
+                Success = true,
+                TotalAtumItems = 0,
+                MatchedInDatabase = 0,
+                NotFoundInDatabase = 0,
+                Message = "No items found in ATUM inventory"
+            });
+        }
+
+        // 3. Update database with ATUM data
+        int matchedCount = 0;
+        int notFoundCount = 0;
+
+        foreach (var atumItem in atumItems)
+        {
+            try
+            {
+                var sku = atumItem.GetSku();
+                if (string.IsNullOrEmpty(sku))
+                {
+                    logger.LogWarning("ATUM item {AtumId} has no SKU, skipping", atumItem.Id);
+                    notFoundCount++;
+                    continue;
+                }
+
+                // Find product in database by SKU
+                var product = await db.Products.FirstOrDefaultAsync(p => p.Sku == sku, cancellationToken);
+
+                if (product != null)
+                {
+                    // Update with ATUM data
+                    product.AtumId = atumItem.Id.ToString();
+                    product.AtumQuantity = atumItem.GetStockQuantity();
+                    product.UpdatedAt = DateTime.UtcNow;
+                    product.LastSyncedAt = DateTime.UtcNow;
+                    product.LastSyncStatus = "ATUM: Updated";
+
+                    matchedCount++;
+                    logger.LogDebug("Updated product {Name} (SKU: {Sku}) with ATUM ID: {AtumId}, Quantity: {Quantity}",
+                        product.Name, sku, atumItem.Id, atumItem.GetStockQuantity());
+                }
+                else
+                {
+                    notFoundCount++;
+                    logger.LogWarning("Product with SKU {Sku} not found in database (ATUM ID: {AtumId})",
+                        sku, atumItem.Id);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error processing ATUM item {AtumId}", atumItem.Id);
+                notFoundCount++;
+            }
+        }
+
+        // 4. Save changes to database
+        await db.SaveChangesAsync(cancellationToken);
+        logger.LogInformation("Saved changes to database: {Matched} matched, {NotFound} not found",
+            matchedCount, notFoundCount);
+
+        return Results.Ok(new
+        {
+            Success = true,
+            TotalAtumItems = atumItems.Count,
+            MatchedInDatabase = matchedCount,
+            NotFoundInDatabase = notFoundCount,
+            Message = $"ATUM sync completed: {matchedCount} products updated, {notFoundCount} not found in database"
+        });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Error during ATUM sync: {Message}", ex.Message);
+        return Results.Problem($"Error during ATUM sync: {ex.Message}");
+    }
+})
+.WithName("SyncAtum")
+.WithSummary("ATUM Sync: Διάβασμα από ATUM και ενημέρωση βάσης")
+.WithDescription("Καλεί το ATUM API, παίρνει το inventory, και ενημερώνει τη βάση με ATUM IDs και quantities");
+
+// Βήμα 2: Fetch από SoftOne API και αποθήκευση στη βάση
+syncGroup.MapPost("/softone-to-database", async (
+    SyncDbContext db,
+    SettingsService settingsService,
+    ProductMatchingService productMatchingService,
+    ILogger<Program> logger,
+    CancellationToken cancellationToken) =>
+{
+    logger.LogInformation("=== ΒΗΜΑ 2: Fetch SoftOne → Database ===");
+
+    try
+    {
+        // 1. Get settings
+        var settings = await settingsService.GetAppSettingsAsync();
+        if (settings == null)
+        {
+            logger.LogError("Settings not found");
+            return Results.Problem("Settings not configured");
+        }
+
+        var apiSettings = settings.ToApiModel();
+        if (string.IsNullOrEmpty(apiSettings.SoftOneGo.Token))
+        {
+            logger.LogError("SoftOne Go token is not configured");
+            return Results.Problem("SoftOne Go token not configured");
+        }
+
+        // 2. Call SoftOne API
+        logger.LogInformation("Calling SoftOne API...");
+        var client = new HttpClient();
+        var request = new HttpRequestMessage(HttpMethod.Post, $"{apiSettings.SoftOneGo.BaseUrl}/list/item");
+        request.Headers.Add("s1code", apiSettings.SoftOneGo.S1Code);
+        var content = new StringContent(
+            $"{{\n    \"appId\": \"703\",\n    \"filters\": \"ITEM.MTRL_ITEMTRDATA_QTY1=1&ITEM.MTRL_ITEMTRDATA_QTY1_TO=9999\",\n    \"token\": \"{apiSettings.SoftOneGo.Token}\"\n}}",
+            null,
+            "application/json");
+        request.Content = content;
+
+        var response = await client.SendAsync(request, cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+            logger.LogError("SoftOne API error {StatusCode}: {ErrorContent}", response.StatusCode, errorContent);
+            return Results.Problem($"SoftOne API error: {response.StatusCode} - {errorContent}");
+        }
+
+        // 3. Parse response
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        string responseContent;
+        var contentEncoding = response.Content.Headers.ContentEncoding;
+
+        if (contentEncoding.Contains("gzip"))
+        {
+            using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var gzipStream = new System.IO.Compression.GZipStream(responseStream, System.IO.Compression.CompressionMode.Decompress);
+            using var reader = new StreamReader(gzipStream, Encoding.GetEncoding("windows-1253"));
+            responseContent = await reader.ReadToEndAsync();
+        }
+        else
+        {
+            var responseBytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            var encoding = Encoding.GetEncoding("windows-1253");
+            responseContent = encoding.GetString(responseBytes);
+        }
+
+        logger.LogInformation("Received response from SoftOne API");
+
+        // 4. Parse JSON
+        using var document = JsonDocument.Parse(responseContent);
+        var root = document.RootElement;
+
+        if (!root.TryGetProperty("success", out var successElement) || !successElement.GetBoolean())
+        {
+            logger.LogError("SoftOne API returned success=false");
+            return Results.Problem("SoftOne API returned unsuccessful response");
+        }
+
+        var totalCount = root.TryGetProperty("totalcount", out var totalElement) ? totalElement.GetInt32() : 0;
+        logger.LogInformation("SoftOne API returned {TotalCount} products", totalCount);
+
+        if (!root.TryGetProperty("fields", out var fieldsElement) || !root.TryGetProperty("rows", out var rowsElement))
+        {
+            logger.LogError("Missing fields or rows in SoftOne API response");
+            return Results.Problem("Missing fields or rows in SoftOne API response");
+        }
+
+        // 5. Extract field names
+        var fieldNames = new List<string>();
+        foreach (var field in fieldsElement.EnumerateArray())
+        {
+            if (field.TryGetProperty("name", out var nameElement))
+            {
+                fieldNames.Add(nameElement.GetString() ?? "");
+            }
+        }
+
+        // 6. Convert rows to structured products
+        var products = new List<Dictionary<string, string?>>();
+        foreach (var row in rowsElement.EnumerateArray())
+        {
+            var product = new Dictionary<string, string?>();
+            var values = row.EnumerateArray().ToList();
+
+            for (int i = 0; i < fieldNames.Count && i < values.Count; i++)
+            {
+                var fieldName = fieldNames[i];
+                var value = values[i].ValueKind == JsonValueKind.Null ? null : values[i].GetString();
+                product[fieldName] = value;
+            }
+
+            products.Add(product);
+        }
+
+        logger.LogInformation("Parsed {ProductCount} products from SoftOne API", products.Count);
+
+        // 7. Process and save to database
+        int createdCount = 0;
+        int updatedCount = 0;
+        int errorCount = 0;
+
+        foreach (var product in products)
+        {
+            try
+            {
+                var result = await productMatchingService.ProcessSoftOneProductAsync(product, cancellationToken);
+
+                if (result.Success)
+                {
+                    if (result.Action == ProductAction.Created)
+                        createdCount++;
+                    else if (result.Action == ProductAction.Updated)
+                        updatedCount++;
+
+                    logger.LogDebug("Processed product {ProductId}: {Action}", result.Product.Id, result.Action);
+                }
+                else
+                {
+                    errorCount++;
+                    logger.LogWarning("Failed to process product: {ErrorMessage}", result.ErrorMessage);
+                }
+            }
+            catch (Exception ex)
+            {
+                errorCount++;
+                var productName = product.GetValueOrDefault("ITEM.NAME") ?? "Unknown";
+                logger.LogError(ex, "Error processing product {ProductName}: {Message}", productName, ex.Message);
+            }
+        }
+
+        logger.LogInformation("Completed: Created={Created}, Updated={Updated}, Errors={Errors}",
+            createdCount, updatedCount, errorCount);
+
+        return Results.Ok(new
+        {
+            Success = true,
+            TotalFetched = products.Count,
+            Created = createdCount,
+            Updated = updatedCount,
+            Errors = errorCount,
+            Message = $"SoftOne sync completed. Created: {createdCount}, Updated: {updatedCount}, Errors: {errorCount}"
+        });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Error during SoftOne sync: {Message}", ex.Message);
+        return Results.Problem($"Error during SoftOne sync: {ex.Message}");
+    }
+})
+.WithName("SyncSoftOneToDatabase")
+.WithSummary("ΒΗΜΑ 2: Fetch από SoftOne API και αποθήκευση στη βάση")
+.WithDescription("Καλεί το SoftOne API, παίρνει προϊόντα, και τα αποθηκεύει/ενημερώνει στη βάση μας");
+
 productsGroup.MapGet("/", async (SyncDbContext db, int page = 1, int pageSize = 50) =>
 {
     try
@@ -291,623 +1086,6 @@ storesGroup.MapGet("/", async (SyncDbContext db) =>
 .WithSummary("Get list of active stores")
 .WithDescription("Retrieves all active WooCommerce stores configured for synchronization");
 
-syncGroup.MapPost("/manual", async (SyncDbContext db, SettingsService settingsService, SoftOneApiService softOneApiService, ProductMatchingService productMatchingService, EmailService emailService, ILogger<Program> logger, CancellationToken cancellationToken) =>
-{
-    Console.WriteLine("\n\nManual sync endpoint called\n\n");
-    logger.LogInformation("===== MANUAL SYNC ENDPOINT CALLED =====");
-    logger.LogInformation("Manual sync requested at {time}", DateTime.UtcNow);
-
-    //get settings from database
-    var settings = await settingsService.GetAppSettingsAsync();
-
-    // Check if settings are valid
-    if (settings == null)
-    {
-        logger.LogError("Failed to retrieve settings");
-        return Results.Problem("Failed to retrieve settings");
-    }
-
-    logger.LogDebug("Retrieved settings from database");
-
-    //deserialize to api model for easier handling
-    var apiSettings = settings.ToApiModel();
-
-    if (string.IsNullOrEmpty(apiSettings.SoftOneGo.Token))
-    {
-        logger.LogError("SoftOne Go token is not configured");
-        return Results.Problem("SoftOne Go is not configured go to settings to configure the service.");
-    }
-
-    var client = new HttpClient();
-    var request = new HttpRequestMessage(HttpMethod.Post, $"{apiSettings.SoftOneGo.BaseUrl}/list/item");
-    request.Headers.Add("s1code", apiSettings.SoftOneGo.S1Code);
-    var content = new StringContent($"{{\n    \"appId\": \"703\",\n    \"filters\": \"ITEM.MTRL_ITEMTRDATA_QTY1=1&ITEM.MTRL_ITEMTRDATA_QTY1_TO=9999\",\n    \"token\": \"{apiSettings.SoftOneGo.Token}\"\n}}", null, "application/json");
-    request.Content = content;
-
-    Console.WriteLine("Sending request to SoftOne Go API...");
-
-    var response = await client.SendAsync(request);
-
-    if (!response.IsSuccessStatusCode)
-    {
-        var errorContent = await response.Content.ReadAsStringAsync();
-        logger.LogError("SoftOne API returned error {StatusCode}: {ErrorContent}", response.StatusCode, errorContent);
-        logger.LogError("Request URL: {RequestUrl}", request.RequestUri);
-        logger.LogError("Request Headers: s1code={S1Code}", apiSettings.SoftOneGo.S1Code);
-
-        return Results.Problem($"SoftOne API error: {response.StatusCode} - {errorContent}");
-    }
-
-
-    // Register encoding provider for Windows-1253
-    Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-    
-    // Check if response is compressed and handle accordingly
-    string responseContent;
-    var contentEncoding = response.Content.Headers.ContentEncoding;
-    
-    if (contentEncoding.Contains("gzip"))
-    {
-        // Handle gzip compressed response
-        using var responseStream = await response.Content.ReadAsStreamAsync();
-        using var gzipStream = new System.IO.Compression.GZipStream(responseStream, System.IO.Compression.CompressionMode.Decompress);
-        using var reader = new StreamReader(gzipStream, Encoding.GetEncoding("windows-1253"));
-        responseContent = await reader.ReadToEndAsync();
-    }
-    else
-    {
-        // Handle uncompressed response with Windows-1253 encoding
-        var responseBytes = await response.Content.ReadAsByteArrayAsync();
-        var encoding = Encoding.GetEncoding("windows-1253");
-        responseContent = encoding.GetString(responseBytes);
-    }
-
-    Console.WriteLine("Received response from SoftOne Go API...");
-
-    try
-    {
-        using var document = JsonDocument.Parse(responseContent);
-        var root = document.RootElement;
-
-        if (root.TryGetProperty("success", out var successElement) && successElement.GetBoolean())
-        {
-            var totalCount = root.TryGetProperty("totalcount", out var totalElement) ? totalElement.GetInt32() : 0;
-            var updateDate = root.TryGetProperty("upddate", out var updateElement) ? updateElement.GetString() : "";
-            var requestId = root.TryGetProperty("reqID", out var reqElement) ? reqElement.GetString() : "";
-            
-            Console.WriteLine($"SoftOne API Success! Total Products: {totalCount}");
-            Console.WriteLine($"Update Date: {updateDate}");
-            Console.WriteLine($"Request ID: {requestId}");
-            
-            if (root.TryGetProperty("fields", out var fieldsElement) && 
-                root.TryGetProperty("rows", out var rowsElement))
-            {
-                // Extract field names
-                var fieldNames = new List<string>();
-                foreach (var field in fieldsElement.EnumerateArray())
-                {
-                    if (field.TryGetProperty("name", out var nameElement))
-                    {
-                        fieldNames.Add(nameElement.GetString() ?? "");
-                    }
-                }
-                
-                // Convert rows to structured products
-                var products = new List<Dictionary<string, string?>>();
-                foreach (var row in rowsElement.EnumerateArray())
-                {
-                    var product = new Dictionary<string, string?>();
-                    var values = row.EnumerateArray().ToList();
-                    
-                    for (int i = 0; i < fieldNames.Count && i < values.Count; i++)
-                    {
-                        var fieldName = fieldNames[i];
-                        var value = values[i].ValueKind == JsonValueKind.Null ? null : values[i].GetString();
-                        product[fieldName] = value;
-                    }
-                    
-                    products.Add(product);
-                }
-                
-                Console.WriteLine($"Successfully parsed {products.Count} products");
-                
-                // Display first few products for debugging
-                foreach (var product in products.Take(5))
-                {
-                    var name = product.GetValueOrDefault("ITEM.NAME") ?? "";
-                    var code = product.GetValueOrDefault("ITEM.CODE") ?? "";
-                    var price = product.GetValueOrDefault("ITEM.PRICER") ?? "";
-                    var stock = product.GetValueOrDefault("ITEM.MTRL_ITEMTRDATA_QTY1") ?? "";
-                    
-                    Console.WriteLine($"Product: {name} | Code: {code} | Price: €{price} | Stock: {stock}");
-                }
-                
-                // Process products using ProductMatchingService
-                logger.LogInformation("Retrieved {ProductCount} products from SoftOne Go API, starting database sync...", products.Count);
-
-                // Create sync log
-                var syncLog = new SyncLog
-                {
-                    StartedAt = DateTime.UtcNow,
-                    Status = "Running",
-                    TotalProducts = products.Count,
-                    CreatedProducts = 0,
-                    UpdatedProducts = 0,
-                    SkippedProducts = 0,
-                    ErrorCount = 0
-                };
-
-                db.SyncLogs.Add(syncLog);
-                await db.SaveChangesAsync(cancellationToken);
-
-                var createdCount = 0;
-                var updatedCount = 0;
-                var errorCount = 0;
-
-                // Process each product using ProductMatchingService
-                foreach (var product in products)
-                {
-                    try
-                    {
-                        var result = await productMatchingService.ProcessSoftOneProductAsync(product, cancellationToken);
-
-                        if (result.Success)
-                        {
-                            if (result.Action == ProductAction.Created)
-                                createdCount++;
-                            else if (result.Action == ProductAction.Updated)
-                                updatedCount++;
-
-                            logger.LogDebug("Processed product {ProductId}: {Action} via {MatchType} match",
-                                result.Product.Id, result.Action, result.MatchType);
-                        }
-                        else
-                        {
-                            errorCount++;
-                            logger.LogWarning("Failed to process SoftOne product: {ErrorMessage}", result.ErrorMessage);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        errorCount++;
-                        var productName = product.GetValueOrDefault("ITEM.NAME") ?? "Unknown";
-                        logger.LogError(ex, "Error processing SoftOne product {ProductName}: {Message}",
-                            productName, ex.Message);
-                    }
-                }
-
-                // Update sync log with results
-                syncLog.CreatedProducts = createdCount;
-                syncLog.UpdatedProducts = updatedCount;
-                syncLog.ErrorCount = errorCount;
-                syncLog.Status = errorCount > 0 ? "Completed with errors" : "Completed";
-                syncLog.CompletedAt = DateTime.UtcNow;
-
-                await db.SaveChangesAsync(cancellationToken);
-
-                logger.LogInformation("Manual sync completed. Created: {Created}, Updated: {Updated}, Errors: {Errors}",
-                    createdCount, updatedCount, errorCount);
-
-                return Results.Ok(new ManualSyncResponse
-                {
-                    Message = $"Manual sync completed successfully. Created: {createdCount}, Updated: {updatedCount}, Errors: {errorCount}",
-                    SyncLogId = syncLog.Id
-                });
-            }
-            else
-            {
-                Console.WriteLine("Missing fields or rows in SoftOne API response");
-                return Results.Problem("Missing fields or rows in SoftOne API response");
-            }
-        }
-        else
-        {
-            Console.WriteLine("SoftOne API call was not successful");
-            logger.LogWarning("SoftOne API returned success=false");
-            return Results.Problem("SoftOne API returned unsuccessful response");
-        }
-    }
-    catch (JsonException jsonEx)
-    {
-        logger.LogError(jsonEx, "Error deserializing SoftOne response: {Message}", jsonEx.Message);
-        Console.WriteLine($"Error deserializing SoftOne response: {jsonEx.Message}");
-        Console.WriteLine("Raw response content for debugging:");
-        Console.WriteLine(responseContent.Substring(0, Math.Min(500, responseContent.Length)));
-        return Results.Problem("Error deserializing SoftOne response");
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Unexpected error processing SoftOne response: {Message}", ex.Message);
-        Console.WriteLine($"Unexpected error processing SoftOne response: {ex.Message}");
-        return Results.Problem("Unexpected error processing SoftOne response");
-    }
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-   
-})
-.WithName("StartManualSync")
-.WithSummary("Start a manual synchronization process")
-.WithDescription("Initiates a manual synchronization of products from SoftOne Go to WooCommerce ATUM");
-
-syncGroup.MapPost("/atum", async (SyncDbContext db, SettingsService settingsService, AtumApiService atumApiService, ProductMatchingService productMatchingService, ILogger<Program> logger, CancellationToken cancellationToken) =>
-{
-    logger.LogInformation("ATUM sync requested at {time}", DateTime.UtcNow);
-
-    // Get settings from database
-    var settings = await settingsService.GetAppSettingsAsync();
-
-    // Check if settings are valid
-    if (settings == null)
-    {
-        logger.LogError("Failed to retrieve settings");
-        return Results.Problem("Failed to retrieve settings");
-    }
-
-    // Deserialize to API model for easier handling
-    var apiSettings = settings.ToApiModel();
-
-    if (string.IsNullOrEmpty(apiSettings.WooCommerce.ConsumerKey) || string.IsNullOrEmpty(apiSettings.WooCommerce.ConsumerSecret))
-    {
-        logger.LogError("WooCommerce credentials are not configured");
-        return Results.Problem("WooCommerce credentials are not configured. Go to settings to configure the service.");
-    }
-
-    try
-    {
-        logger.LogInformation("Starting ATUM inventory fetch for location {LocationId}", apiSettings.ATUM.LocationId);
-
-        // Fetch all ATUM inventory items
-        var atumItems = await atumApiService.GetAllInventoryAsync(
-            apiSettings.WooCommerce.ConsumerKey,
-            apiSettings.WooCommerce.ConsumerSecret,
-            apiSettings.ATUM.LocationId,
-            cancellationToken);
-
-        logger.LogInformation("Retrieved {ItemCount} items from ATUM API, starting database sync...", atumItems.Count);
-
-        // Create sync log
-        var syncLog = new SyncLog
-        {
-            StartedAt = DateTime.UtcNow,
-            Status = "Running",
-            TotalProducts = atumItems.Count,
-            CreatedProducts = 0,
-            UpdatedProducts = 0,
-            SkippedProducts = 0,
-            ErrorCount = 0
-        };
-
-        db.SyncLogs.Add(syncLog);
-        await db.SaveChangesAsync(cancellationToken);
-
-        var createdCount = 0;
-        var updatedCount = 0;
-        var errorCount = 0;
-
-        // Process each ATUM item using ProductMatchingService
-        foreach (var atumItem in atumItems)
-        {
-            try
-            {
-                var result = await productMatchingService.ProcessAtumProductAsync(atumItem, cancellationToken);
-
-                if (result.Success)
-                {
-                    if (result.Action == ProductAction.Created)
-                        createdCount++;
-                    else if (result.Action == ProductAction.Updated)
-                        updatedCount++;
-
-                    logger.LogDebug("Processed ATUM product {ProductId}: {Action} via {MatchType} match",
-                        result.Product.Id, result.Action, result.MatchType);
-                }
-                else
-                {
-                    errorCount++;
-                    logger.LogWarning("Failed to process ATUM product: {ErrorMessage}", result.ErrorMessage);
-                }
-            }
-            catch (Exception ex)
-            {
-                errorCount++;
-                logger.LogError(ex, "Error processing ATUM product {AtumId} ({SKU}): {Message}",
-                    atumItem.Id, atumItem.GetSku(), ex.Message);
-            }
-        }
-
-        // Update sync log with results
-        syncLog.CreatedProducts = createdCount;
-        syncLog.UpdatedProducts = updatedCount;
-        syncLog.ErrorCount = errorCount;
-        syncLog.Status = errorCount > 0 ? "Completed with errors" : "Completed";
-        syncLog.CompletedAt = DateTime.UtcNow;
-
-        await db.SaveChangesAsync(cancellationToken);
-
-        logger.LogInformation("ATUM sync completed. Created: {Created}, Updated: {Updated}, Errors: {Errors}",
-            createdCount, updatedCount, errorCount);
-
-        return Results.Ok(new ManualSyncResponse
-        {
-            Message = $"ATUM sync completed successfully. Created: {createdCount}, Updated: {updatedCount}, Errors: {errorCount}",
-            SyncLogId = syncLog.Id
-        });
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Error during ATUM sync: {Message}", ex.Message);
-        return Results.Problem($"Error during ATUM sync: {ex.Message}");
-    }
-})
-.WithName("StartAtumSync")
-.WithSummary("Start an ATUM inventory synchronization")
-.WithDescription("Initiates a synchronization of inventory data from ATUM Multi Inventory");
-
-syncGroup.MapPost("/atum-batch", async (SyncDbContext db, SettingsService settingsService, AtumApiService atumApiService, Soft1_To_Atum.ApiService.Services.AtumBatchService atumBatchService, ILogger<Program> logger, CancellationToken cancellationToken) =>
-{
-    logger.LogInformation("=== ATUM BATCH SYNC REQUESTED ===");
-    logger.LogInformation("ATUM batch sync requested at {time}", DateTime.UtcNow);
-
-    try
-    {
-        // Get settings from database
-        var settings = await settingsService.GetAppSettingsAsync();
-        if (settings == null)
-        {
-            logger.LogError("Settings not found");
-            return Results.Problem("Settings not configured");
-        }
-
-        if (string.IsNullOrEmpty(settings.WooCommerceConsumerKey) || string.IsNullOrEmpty(settings.WooCommerceConsumerSecret))
-        {
-            logger.LogError("WooCommerce API credentials not configured");
-            return Results.Problem("WooCommerce API credentials not configured");
-        }
-
-        // Prepare batch request using AtumBatchService (limit to 50 items to avoid "Request Entity Too Large")
-        logger.LogInformation("Preparing ATUM batch request...");
-        var batchRequest = await atumBatchService.PrepareAtumBatchRequestAsync(maxBatchSize: 50);
-
-        if ((batchRequest.Create?.Count ?? 0) == 0 && (batchRequest.Update?.Count ?? 0) == 0)
-        {
-            logger.LogInformation("No products need batch synchronization");
-            return Results.Ok(new ManualSyncResponse
-            {
-                Message = "No products need batch synchronization. All products are already in sync.",
-                SyncLogId = 0
-            });
-        }
-
-        // Create sync log
-        var syncLog = new SyncLog
-        {
-            StartedAt = DateTime.UtcNow,
-            Status = "Running",
-            TotalProducts = (batchRequest.Create?.Count ?? 0) + (batchRequest.Update?.Count ?? 0),
-            CreatedProducts = 0,
-            UpdatedProducts = 0,
-            SkippedProducts = 0,
-            ErrorCount = 0
-        };
-
-        db.SyncLogs.Add(syncLog);
-        await db.SaveChangesAsync(cancellationToken);
-
-        logger.LogInformation("Created sync log with ID: {SyncLogId}", syncLog.Id);
-
-        // Perform batch update via ATUM API
-        logger.LogInformation("Sending batch request to ATUM API...");
-        var batchResponse = await atumApiService.BatchUpdateInventoryAsync(
-            settings.WooCommerceConsumerKey,
-            settings.WooCommerceConsumerSecret,
-            batchRequest,
-            cancellationToken);
-
-        // Process the batch response
-        logger.LogInformation("Processing ATUM batch response...");
-        await atumBatchService.ProcessAtumBatchResponseAsync(batchResponse);
-
-        // Update sync log with results
-        syncLog.CompletedAt = DateTime.UtcNow;
-        syncLog.Status = "Completed";
-        syncLog.CreatedProducts = batchResponse.Create?.Count(p => p.Id > 0) ?? 0;
-        syncLog.UpdatedProducts = batchResponse.Update?.Count(p => p.Id > 0) ?? 0;
-        syncLog.ErrorCount = (batchResponse.Create?.Count(p => !string.IsNullOrEmpty(p.Error?.Message)) ?? 0) +
-                            (batchResponse.Update?.Count(p => !string.IsNullOrEmpty(p.Error?.Message)) ?? 0);
-
-        await db.SaveChangesAsync(cancellationToken);
-
-        logger.LogInformation("=== ATUM BATCH SYNC COMPLETED ===");
-        logger.LogInformation("Batch sync results: {CreatedCount} created, {UpdatedCount} updated, {ErrorCount} errors",
-            syncLog.CreatedProducts, syncLog.UpdatedProducts, syncLog.ErrorCount);
-
-        return Results.Ok(new ManualSyncResponse
-        {
-            Message = $"ATUM batch sync completed successfully. Created: {syncLog.CreatedProducts}, Updated: {syncLog.UpdatedProducts}, Errors: {syncLog.ErrorCount}",
-            SyncLogId = syncLog.Id
-        });
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Error during ATUM batch sync: {Message}", ex.Message);
-        return Results.Problem($"Error during ATUM batch sync: {ex.Message}");
-    }
-})
-.WithName("StartAtumBatchSync")
-.WithSummary("Start an ATUM batch inventory synchronization")
-.WithDescription("Initiates a batch synchronization to create/update products in ATUM based on SoftOne quantities");
-
-// WooCommerce sync endpoint
-syncGroup.MapPost("/woocommerce", async (SyncDbContext db, SettingsService settingsService, WooCommerceApiService wooCommerceApiService, ILogger<Program> logger, CancellationToken cancellationToken) =>
-{
-    logger.LogInformation("=== WOOCOMMERCE SYNC REQUESTED ===");
-    logger.LogInformation("WooCommerce sync requested at {time}", DateTime.UtcNow);
-
-    try
-    {
-        // Get settings from database
-        var settings = await settingsService.GetAppSettingsAsync();
-        if (settings == null)
-        {
-            logger.LogError("Settings not found");
-            return Results.Problem("Settings not configured");
-        }
-
-        if (string.IsNullOrEmpty(settings.WooCommerceConsumerKey) || string.IsNullOrEmpty(settings.WooCommerceConsumerSecret))
-        {
-            logger.LogError("WooCommerce API credentials not configured");
-            return Results.Problem("WooCommerce API credentials not configured");
-        }
-
-        logger.LogInformation("Starting WooCommerce product sync...");
-
-        // Fetch all products from WooCommerce
-        var wooCommerceProducts = await wooCommerceApiService.GetAllProductsAsync(
-            settings.WooCommerceConsumerKey,
-            settings.WooCommerceConsumerSecret,
-            cancellationToken);
-
-        logger.LogInformation("Retrieved {count} products from WooCommerce", wooCommerceProducts.Count);
-
-        // Update database with WooCommerce IDs
-        int matchedProducts = 0;
-        int createdProducts = 0;
-        int errorCount = 0;
-
-        foreach (var wooProduct in wooCommerceProducts)
-        {
-            try
-            {
-                if (string.IsNullOrEmpty(wooProduct.Sku))
-                {
-                    logger.LogWarning("WooCommerce product {id} '{name}' has no SKU, skipping", wooProduct.Id, wooProduct.Name);
-                    continue;
-                }
-
-                // Try to find existing product by SKU
-                var existingProduct = await db.Products
-                    .FirstOrDefaultAsync(p => p.Sku == wooProduct.Sku, cancellationToken);
-
-                if (existingProduct != null)
-                {
-                    // Update existing product with WooCommerce ID and name if missing
-                    existingProduct.WooCommerceId = wooProduct.Id.ToString();
-                    if (string.IsNullOrEmpty(existingProduct.Name))
-                    {
-                        existingProduct.Name = wooProduct.Name;
-                    }
-                    existingProduct.LastSyncedAt = DateTime.UtcNow;
-                    existingProduct.LastSyncStatus = "WooCommerce Synced";
-
-                    logger.LogDebug("Updated existing product {sku} with WooCommerce ID {id}", wooProduct.Sku, wooProduct.Id);
-                    matchedProducts++;
-                }
-                else
-                {
-                    // Create new product entry for WooCommerce-only product
-                    var newProduct = new Product
-                    {
-                        Sku = wooProduct.Sku,
-                        Name = wooProduct.Name,
-                        WooCommerceId = wooProduct.Id.ToString(),
-                        Quantity = 0, // Default quantity for WooCommerce-only products
-                        AtumQuantity = 0,
-                        LastSyncedAt = DateTime.UtcNow,
-                        LastSyncStatus = "WooCommerce Synced"
-                    };
-
-                    db.Products.Add(newProduct);
-                    logger.LogDebug("Created new product entry for WooCommerce product {sku} (ID: {id})", wooProduct.Sku, wooProduct.Id);
-                    createdProducts++;
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Error processing WooCommerce product {id} ({sku})", wooProduct.Id, wooProduct.Sku);
-                errorCount++;
-            }
-        }
-
-        // Save all changes to database
-        var savedChanges = await db.SaveChangesAsync(cancellationToken);
-
-        logger.LogInformation("=== WOOCOMMERCE SYNC COMPLETED ===");
-        logger.LogInformation("Results: {matched} matched, {created} created, {errors} errors, {saved} database changes",
-            matchedProducts, createdProducts, errorCount, savedChanges);
-
-        return Results.Ok(new
-        {
-            Success = true,
-            Message = "WooCommerce sync completed successfully",
-            TotalProducts = wooCommerceProducts.Count,
-            MatchedProducts = matchedProducts,
-            CreatedProducts = createdProducts,
-            ErrorCount = errorCount,
-            DatabaseChanges = savedChanges
-        });
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Error during WooCommerce sync");
-        return Results.Problem($"WooCommerce sync failed: {ex.Message}");
-    }
-})
-.WithName("StartWooCommerceSync")
-.WithSummary("Start a WooCommerce product synchronization")
-.WithDescription("Fetches all products from WooCommerce and updates the local database with WooCommerce IDs and product information");
 
 // Settings endpoints
 settingsGroup.MapGet("/", async (SettingsService settingsService, ILogger<Program> logger) =>

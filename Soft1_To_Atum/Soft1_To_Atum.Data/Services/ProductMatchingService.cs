@@ -235,49 +235,144 @@ public class ProductMatchingService
         // Step 3: Update existing or create new
         if (existingProduct != null)
         {
-            // Update existing product with ATUM data
-            MapAtumDataToProduct(atumItem, existingProduct);
-            existingProduct.LastSyncedAt = DateTime.UtcNow;
-            existingProduct.LastSyncStatus = "ATUM: Updated";
-            existingProduct.UpdatedAt = DateTime.UtcNow;
-
-            await _context.SaveChangesAsync(cancellationToken);
-
-            _logger.LogInformation("Updated existing product {ProductId} with ATUM data via {MatchType} match",
-                existingProduct.Id, matchType);
-
-            return new ProductMatchResult
+            // Check if SKU would change and if it would conflict
+            var atumSku = atumItem.GetSku();
+            if (!string.IsNullOrEmpty(atumSku) &&
+                existingProduct.Sku != atumSku &&
+                !string.IsNullOrEmpty(existingProduct.Sku))
             {
-                Product = existingProduct,
-                Action = ProductAction.Updated,
-                MatchType = matchType,
-                Success = true
-            };
+                // SKU would change - check if new SKU already exists in another product
+                var skuConflict = await _context.Products
+                    .AnyAsync(p => p.Id != existingProduct.Id && p.Sku == atumSku, cancellationToken);
+
+                if (skuConflict)
+                {
+                    _logger.LogWarning("Cannot update product {ProductId} SKU from '{OldSku}' to '{NewSku}' - SKU already exists",
+                        existingProduct.Id, existingProduct.Sku, atumSku);
+
+                    // Just update quantities without changing SKU
+                    existingProduct.AtumId = atumItem.Id.ToString();
+                    existingProduct.AtumQuantity = atumItem.GetStockQuantity();
+                    existingProduct.WooCommerceId = atumItem.ProductId.ToString();
+                    existingProduct.LastSyncedAt = DateTime.UtcNow;
+                    existingProduct.LastSyncStatus = "ATUM: Partial Update (SKU conflict)";
+                    existingProduct.UpdatedAt = DateTime.UtcNow;
+                }
+                else
+                {
+                    // Safe to update including SKU
+                    await MapAtumDataToProductAsync(atumItem, existingProduct, cancellationToken);
+                    existingProduct.LastSyncedAt = DateTime.UtcNow;
+                    existingProduct.LastSyncStatus = "ATUM: Updated";
+                    existingProduct.UpdatedAt = DateTime.UtcNow;
+                }
+            }
+            else
+            {
+                // No SKU conflict - update normally
+                await MapAtumDataToProductAsync(atumItem, existingProduct, cancellationToken);
+                existingProduct.LastSyncedAt = DateTime.UtcNow;
+                existingProduct.LastSyncStatus = "ATUM: Updated";
+                existingProduct.UpdatedAt = DateTime.UtcNow;
+            }
+
+            try
+            {
+                await _context.SaveChangesAsync(cancellationToken);
+
+                _logger.LogInformation("Updated existing product {ProductId} with ATUM data via {MatchType} match",
+                    existingProduct.Id, matchType);
+
+                return new ProductMatchResult
+                {
+                    Product = existingProduct,
+                    Action = ProductAction.Updated,
+                    MatchType = matchType,
+                    Success = true
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to save updates for product {ProductId} (SKU: {Sku})",
+                    existingProduct.Id, existingProduct.Sku);
+
+                // Clear any failed changes from the ChangeTracker to prevent issues with subsequent saves
+                _context.ChangeTracker.Clear();
+
+                return new ProductMatchResult
+                {
+                    Product = existingProduct,
+                    Action = ProductAction.Updated,
+                    MatchType = matchType,
+                    Success = false,
+                    ErrorMessage = $"Save failed: {ex.Message}"
+                };
+            }
         }
         else
         {
-            // Create new product from ATUM data
-            var newProduct = await CreateProductFromAtumAsync(atumItem, cancellationToken);
-
-            _context.Products.Add(newProduct);
-            await _context.SaveChangesAsync(cancellationToken);
-
-            _logger.LogInformation("Created new product {ProductId} from ATUM data", newProduct.Id);
-
-            return new ProductMatchResult
+            // Check if a product with this SKU already exists before creating
+            if (!string.IsNullOrEmpty(sku))
             {
-                Product = newProduct,
-                Action = ProductAction.Created,
-                MatchType = "None",
-                Success = true
-            };
+                var skuExists = await _context.Products.AnyAsync(p => p.Sku == sku, cancellationToken);
+                if (skuExists)
+                {
+                    _logger.LogWarning("Cannot create product from ATUM item {AtumId} - SKU '{Sku}' already exists",
+                        atumItem.Id, sku);
+
+                    return new ProductMatchResult
+                    {
+                        Product = null!,
+                        Action = ProductAction.Skipped,
+                        MatchType = "None",
+                        Success = false,
+                        ErrorMessage = $"SKU '{sku}' already exists"
+                    };
+                }
+            }
+
+            try
+            {
+                // Create new product from ATUM data
+                var newProduct = await CreateProductFromAtumAsync(atumItem, cancellationToken);
+
+                _context.Products.Add(newProduct);
+                await _context.SaveChangesAsync(cancellationToken);
+
+                _logger.LogInformation("Created new product {ProductId} from ATUM data", newProduct.Id);
+
+                return new ProductMatchResult
+                {
+                    Product = newProduct,
+                    Action = ProductAction.Created,
+                    MatchType = "None",
+                    Success = true
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to create product from ATUM item {AtumId} (SKU: {Sku})",
+                    atumItem.Id, sku);
+
+                // Clear any failed changes from the ChangeTracker to prevent issues with subsequent saves
+                _context.ChangeTracker.Clear();
+
+                return new ProductMatchResult
+                {
+                    Product = null!,
+                    Action = ProductAction.Created,
+                    MatchType = "None",
+                    Success = false,
+                    ErrorMessage = $"Create failed: {ex.Message}"
+                };
+            }
         }
     }
 
     /// <summary>
     /// Maps ATUM inventory data to an existing Product entity
     /// </summary>
-    private void MapAtumDataToProduct(AtumInventoryItem atumItem, Product product)
+    private async Task MapAtumDataToProductAsync(AtumInventoryItem atumItem, Product product, CancellationToken cancellationToken = default)
     {
         // Update ATUM specific fields
         product.AtumId = atumItem.Id.ToString();
@@ -290,8 +385,22 @@ public class ProductMatchingService
         if (string.IsNullOrEmpty(product.Name) && !string.IsNullOrEmpty(atumItem.Name))
             product.Name = atumItem.Name;
 
+        // Update SKU only if product doesn't have one AND the new SKU doesn't conflict
         if (string.IsNullOrEmpty(product.Sku) && !string.IsNullOrEmpty(atumItem.GetSku()))
-            product.Sku = atumItem.GetSku();
+        {
+            var atumSku = atumItem.GetSku();
+            var skuExists = await _context.Products.AnyAsync(p => p.Id != product.Id && p.Sku == atumSku, cancellationToken);
+
+            if (!skuExists)
+            {
+                product.Sku = atumSku;
+            }
+            else
+            {
+                _logger.LogWarning("Cannot set SKU '{Sku}' for product {ProductId} - SKU already exists in another product",
+                    atumSku, product.Id);
+            }
+        }
     }
 
     /// <summary>
@@ -348,8 +457,8 @@ public class ProductMatchingService
                             wooProduct.Name, atumItem.Id);
 
                         // Also update price if available
-                        if (product.Price == 0 && wooProduct.RegularPrice > 0)
-                            product.Price = wooProduct.RegularPrice;
+                        if (product.Price == 0 && !string.IsNullOrEmpty(wooProduct.RegularPrice) && decimal.TryParse(wooProduct.RegularPrice, out var price) && price > 0)
+                            product.Price = price;
                     }
                     else
                     {

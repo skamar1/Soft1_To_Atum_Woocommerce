@@ -4,15 +4,22 @@ using Soft1_To_Atum.Blazor.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.AddServiceDefaults();
+// Add only the services we need from ServiceDefaults, WITHOUT Service Discovery
+// because we don't need service discovery for a fixed localhost URL
+// and it adds unwanted resilience handlers with default timeouts
+builder.ConfigureOpenTelemetry();
+builder.AddDefaultHealthChecks();
 
 // Add MudBlazor services
 builder.Services.AddMudServices();
 
 // Add HTTP client for API communication
+// NOTE: NO resilience handler, NO service discovery - just a plain HttpClient with a very long timeout
+// The API service has its own resilience policies and handles all retries/timeouts
 builder.Services.AddHttpClient<SyncApiClient>(client =>
 {
-    client.BaseAddress = new Uri("https://localhost:7463"); // ApiService URL
+    client.BaseAddress = new Uri("https://localhost:7463"); // ApiService URL - fixed, no service discovery needed
+    client.Timeout = TimeSpan.FromMinutes(20); // Very long timeout - let the API service handle everything
 });
 
 // Add services to the container.

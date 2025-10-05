@@ -83,6 +83,36 @@
 
                 <PropertyColumn Property="x => x.InternalId" Title="MTRL" />
 
+                <PropertyColumn Property="x => x.WooCommerceId" Title="WooCommerce ID">
+                    <CellTemplate>
+                        @if (!string.IsNullOrEmpty(context.Item.WooCommerceId))
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Success">
+                                @context.Item.WooCommerceId
+                            </MudChip>
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">-</MudText>
+                        }
+                    </CellTemplate>
+                </PropertyColumn>
+
+                <PropertyColumn Property="x => x.AtumId" Title="ATUM ID">
+                    <CellTemplate>
+                        @if (!string.IsNullOrEmpty(context.Item.AtumId))
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Info">
+                                @context.Item.AtumId
+                            </MudChip>
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.caption" Class="mud-text-secondary">-</MudText>
+                        }
+                    </CellTemplate>
+                </PropertyColumn>
+
                 <PropertyColumn Property="x => x.Name" Title="Name">
                     <CellTemplate>
                         <MudText>

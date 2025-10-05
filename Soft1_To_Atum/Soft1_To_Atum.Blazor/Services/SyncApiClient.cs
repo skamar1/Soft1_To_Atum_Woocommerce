@@ -104,48 +104,48 @@ public class SyncApiClient
     {
         try
         {
-            _logger.LogInformation("=== MANUAL SYNC CLIENT REQUEST START ===");
+            _logger.LogInformation("=== SOFTONE TO DATABASE SYNC CLIENT REQUEST START ===");
             _logger.LogInformation("HTTP Client BaseAddress: {BaseAddress}", _httpClient.BaseAddress);
-            _logger.LogInformation("Starting manual sync API call to /api/sync/manual");
+            _logger.LogInformation("Starting SoftOne to Database sync API call to /api/sync/softone-to-database");
 
-            var response = await _httpClient.PostAsync("/api/sync/manual", null);
-            _logger.LogInformation("Manual sync API response status: {StatusCode}", response.StatusCode);
+            var response = await _httpClient.PostAsync("/api/sync/softone-to-database", null);
+            _logger.LogInformation("SoftOne to Database sync API response status: {StatusCode}", response.StatusCode);
 
             if (response.IsSuccessStatusCode)
             {
                 var content = await response.Content.ReadAsStringAsync();
-                _logger.LogInformation("Manual sync API response content: {Content}", content);
+                _logger.LogInformation("SoftOne to Database sync API response content: {Content}", content);
 
                 var result = JsonSerializer.Deserialize<ManualSyncResponse>(content, new JsonSerializerOptions
                 {
                     PropertyNameCaseInsensitive = true
                 });
 
-                _logger.LogInformation("Manual sync API call completed successfully. SyncLogId: {SyncLogId}", result?.SyncLogId);
-                _logger.LogInformation("=== MANUAL SYNC CLIENT REQUEST SUCCESS ===");
+                _logger.LogInformation("SoftOne to Database sync API call completed successfully");
+                _logger.LogInformation("=== SOFTONE TO DATABASE SYNC CLIENT REQUEST SUCCESS ===");
                 return result;
             }
             else
             {
                 var errorContent = await response.Content.ReadAsStringAsync();
-                _logger.LogError("Manual sync API failed with status {StatusCode}: {ErrorContent}", response.StatusCode, errorContent);
-                throw new HttpRequestException($"Manual sync failed: {response.StatusCode} - {errorContent}");
+                _logger.LogError("SoftOne to Database sync API failed with status {StatusCode}: {ErrorContent}", response.StatusCode, errorContent);
+                throw new HttpRequestException($"SoftOne sync failed: {response.StatusCode} - {errorContent}");
             }
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogError(ex, "HTTP error during manual sync request to {BaseAddress}", _httpClient.BaseAddress);
+            _logger.LogError(ex, "HTTP error during SoftOne sync request to {BaseAddress}", _httpClient.BaseAddress);
             throw new Exception($"Failed to connect to API service at {_httpClient.BaseAddress}. Error: {ex.Message}", ex);
         }
         catch (TaskCanceledException ex)
         {
-            _logger.LogError(ex, "Timeout during manual sync request to {BaseAddress}", _httpClient.BaseAddress);
+            _logger.LogError(ex, "Timeout during SoftOne sync request to {BaseAddress}", _httpClient.BaseAddress);
             throw new Exception($"Request timed out connecting to API service at {_httpClient.BaseAddress}", ex);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Unexpected error during manual sync request");
-            throw new Exception($"Unexpected error during manual sync: {ex.Message}", ex);
+            _logger.LogError(ex, "Unexpected error during SoftOne sync request");
+            throw new Exception($"Unexpected error during SoftOne sync: {ex.Message}", ex);
         }
     }
 
@@ -460,52 +460,150 @@ public class SyncApiClient
         }
     }
 
-    public async Task<ManualSyncResponse?> StartWooCommerceSyncAsync()
+    public async Task<AtumBatchSingleSyncResponse?> StartAtumBatchSyncSingleAsync()
     {
         try
         {
-            _logger.LogInformation("=== WOOCOMMERCE SYNC CLIENT REQUEST START ===");
-            _logger.LogInformation("HTTP Client BaseAddress: {BaseAddress}", _httpClient.BaseAddress);
-            _logger.LogInformation("Starting WooCommerce sync API call to /api/sync/woocommerce");
+            _logger.LogDebug("Starting ATUM single batch sync API call to /api/sync/atum-batch-single");
 
-            var response = await _httpClient.PostAsync("/api/sync/woocommerce", null);
-            _logger.LogInformation("WooCommerce sync API response status: {StatusCode}", response.StatusCode);
+            var response = await _httpClient.PostAsync("/api/sync/atum-batch-single", null);
+            _logger.LogDebug("ATUM single batch sync API response status: {StatusCode}", response.StatusCode);
 
             if (response.IsSuccessStatusCode)
             {
                 var content = await response.Content.ReadAsStringAsync();
-                _logger.LogInformation("WooCommerce sync API response content: {Content}", content);
-
-                var result = JsonSerializer.Deserialize<ManualSyncResponse>(content, new JsonSerializerOptions
+                var result = JsonSerializer.Deserialize<AtumBatchSingleSyncResponse>(content, new JsonSerializerOptions
                 {
                     PropertyNameCaseInsensitive = true
                 });
 
-                _logger.LogInformation("WooCommerce sync API call completed successfully");
-                _logger.LogInformation("=== WOOCOMMERCE SYNC CLIENT REQUEST SUCCESS ===");
+                _logger.LogDebug("ATUM single batch sync completed: Created={Created}, Updated={Updated}, Errors={Errors}, HasMore={HasMore}",
+                    result?.Created, result?.Updated, result?.Errors, result?.HasMore);
                 return result;
             }
             else
             {
                 var errorContent = await response.Content.ReadAsStringAsync();
-                _logger.LogError("WooCommerce sync API failed with status {StatusCode}: {ErrorContent}", response.StatusCode, errorContent);
-                throw new HttpRequestException($"WooCommerce sync failed: {response.StatusCode} - {errorContent}");
+                _logger.LogError("ATUM single batch sync API failed with status {StatusCode}: {ErrorContent}", response.StatusCode, errorContent);
+                throw new HttpRequestException($"ATUM single batch sync failed: {response.StatusCode} - {errorContent}");
             }
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogError(ex, "HTTP error during WooCommerce sync request to {BaseAddress}", _httpClient.BaseAddress);
+            _logger.LogError(ex, "HTTP error during ATUM single batch sync request to {BaseAddress}", _httpClient.BaseAddress);
             throw new Exception($"Failed to connect to API service at {_httpClient.BaseAddress}. Error: {ex.Message}", ex);
         }
         catch (TaskCanceledException ex)
         {
-            _logger.LogError(ex, "Timeout during WooCommerce sync request to {BaseAddress}", _httpClient.BaseAddress);
+            _logger.LogError(ex, "Timeout during ATUM single batch sync request to {BaseAddress}", _httpClient.BaseAddress);
             throw new Exception($"Request timed out connecting to API service at {_httpClient.BaseAddress}", ex);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Unexpected error during WooCommerce sync request");
-            throw new Exception($"Unexpected error during WooCommerce sync: {ex.Message}", ex);
+            _logger.LogError(ex, "Unexpected error during ATUM single batch sync request");
+            throw new Exception($"Unexpected error during ATUM single batch sync: {ex.Message}", ex);
+        }
+    }
+
+    public async Task<BackgroundJobStartResponse?> StartWooCommerceBackgroundSyncAsync()
+    {
+        try
+        {
+            _logger.LogInformation("=== WOOCOMMERCE BACKGROUND SYNC CLIENT REQUEST START ===");
+            _logger.LogInformation("HTTP Client BaseAddress: {BaseAddress}", _httpClient.BaseAddress);
+            _logger.LogInformation("Starting WooCommerce background sync API call to /api/background/woocommerce-sync");
+
+            var response = await _httpClient.PostAsync("/api/background/woocommerce-sync", null);
+            _logger.LogInformation("WooCommerce background sync API response status: {StatusCode}", response.StatusCode);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                _logger.LogInformation("WooCommerce background sync API response content: {Content}", content);
+
+                var result = JsonSerializer.Deserialize<BackgroundJobStartResponse>(content, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+
+                _logger.LogInformation("WooCommerce background sync job started with ID: {JobId}", result?.JobId);
+                _logger.LogInformation("=== WOOCOMMERCE BACKGROUND SYNC CLIENT REQUEST SUCCESS ===");
+                return result;
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                _logger.LogError("WooCommerce background sync API failed with status {StatusCode}: {ErrorContent}", response.StatusCode, errorContent);
+                throw new HttpRequestException($"WooCommerce background sync failed: {response.StatusCode} - {errorContent}");
+            }
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "HTTP error during WooCommerce background sync request to {BaseAddress}", _httpClient.BaseAddress);
+            throw new Exception($"Failed to connect to API service at {_httpClient.BaseAddress}. Error: {ex.Message}", ex);
+        }
+        catch (TaskCanceledException ex)
+        {
+            _logger.LogError(ex, "Timeout during WooCommerce background sync request to {BaseAddress}", _httpClient.BaseAddress);
+            throw new Exception($"Request timed out connecting to API service at {_httpClient.BaseAddress}", ex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error during WooCommerce background sync request");
+            throw new Exception($"Unexpected error during WooCommerce background sync: {ex.Message}", ex);
+        }
+    }
+
+    public async Task<BackgroundJobStatusResponse?> GetBackgroundJobStatusAsync(string jobId)
+    {
+        try
+        {
+            _logger.LogDebug("Getting background job status for job {JobId}", jobId);
+            var response = await _httpClient.GetAsync($"/api/background/job/{jobId}");
+
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                return JsonSerializer.Deserialize<BackgroundJobStatusResponse>(content, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+            }
+            else
+            {
+                _logger.LogWarning("Failed to get job status for {JobId}: {StatusCode}", jobId, response.StatusCode);
+                return null;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting background job status for job {JobId}", jobId);
+            return null;
+        }
+    }
+
+    public async Task<bool> CancelBackgroundJobAsync(string jobId)
+    {
+        try
+        {
+            _logger.LogInformation("Cancelling background job {JobId}", jobId);
+            var response = await _httpClient.DeleteAsync($"/api/background/job/{jobId}");
+
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation("Successfully cancelled background job {JobId}", jobId);
+                return true;
+            }
+            else
+            {
+                _logger.LogWarning("Failed to cancel job {JobId}: {StatusCode}", jobId, response.StatusCode);
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error cancelling background job {JobId}", jobId);
+            return false;
         }
     }
 
@@ -544,6 +642,89 @@ public class SyncApiClient
         {
             _logger.LogError(ex, "Error deleting all products");
             return false;
+        }
+    }
+
+    public async Task<WooCommercePageSyncResponse?> SyncWooCommercePageAsync(int page)
+    {
+        try
+        {
+            _logger.LogInformation("=== WOOCOMMERCE PAGE SYNC REQUEST ===");
+            _logger.LogInformation("Syncing WooCommerce page {Page} via API", page);
+
+            var response = await _httpClient.PostAsync($"/api/sync/woocommerce-page?page={page}", null);
+            _logger.LogInformation("WooCommerce page sync API response: {StatusCode}", response.StatusCode);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                _logger.LogInformation("WooCommerce page {Page} sync successful: {Content}", page, content);
+
+                return JsonSerializer.Deserialize<WooCommercePageSyncResponse>(content, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                _logger.LogError("WooCommerce page {Page} sync failed: {StatusCode} - {ErrorContent}", page, response.StatusCode, errorContent);
+                throw new HttpRequestException($"WooCommerce page sync failed: {response.StatusCode} - {errorContent}");
+            }
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "HTTP error during WooCommerce page {Page} sync", page);
+            throw new Exception($"Failed to sync WooCommerce page {page}: {ex.Message}", ex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error syncing WooCommerce page {Page}", page);
+            throw new Exception($"Unexpected error syncing page {page}: {ex.Message}", ex);
+        }
+    }
+
+    public async Task<FullSyncResponse?> FullSyncAsync()
+    {
+        try
+        {
+            _logger.LogInformation("=== FULL SYNC REQUEST ===");
+            _logger.LogInformation("Starting full sync (WooCommerce + ATUM Create + ATUM Update) via API");
+
+            var response = await _httpClient.GetAsync("/api/sync/test-read-products");
+            _logger.LogInformation("Full sync API response: {StatusCode}", response.StatusCode);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                _logger.LogInformation("Full sync successful");
+
+                return JsonSerializer.Deserialize<FullSyncResponse>(content, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                _logger.LogError("Full sync failed: {StatusCode} - {ErrorContent}", response.StatusCode, errorContent);
+                throw new HttpRequestException($"Full sync failed: {response.StatusCode} - {errorContent}");
+            }
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "HTTP error during full sync");
+            throw new Exception($"Failed to connect to API service at {_httpClient.BaseAddress}. Error: {ex.Message}", ex);
+        }
+        catch (TaskCanceledException ex)
+        {
+            _logger.LogError(ex, "Timeout during full sync");
+            throw new Exception($"Request timed out connecting to API service at {_httpClient.BaseAddress}", ex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error during full sync");
+            throw new Exception($"Unexpected error during full sync: {ex.Message}", ex);
         }
     }
 }

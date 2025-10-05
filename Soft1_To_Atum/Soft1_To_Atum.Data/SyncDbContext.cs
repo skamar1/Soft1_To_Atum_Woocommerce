@@ -19,8 +19,9 @@ public class SyncDbContext : DbContext
         modelBuilder.Entity<Product>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.HasIndex(e => e.SoftOneId).IsUnique();
-            entity.HasIndex(e => e.Sku);
+            // Removed unique constraint on SoftOneId to allow multiple WooCommerce-only products
+            entity.HasIndex(e => e.SoftOneId);
+            entity.HasIndex(e => e.Sku).IsUnique(); // SKU should be unique instead
             entity.Property(e => e.Name).HasMaxLength(255);
             entity.Property(e => e.Sku).HasMaxLength(100);
             entity.Property(e => e.Price).HasColumnType("decimal(18,2)");

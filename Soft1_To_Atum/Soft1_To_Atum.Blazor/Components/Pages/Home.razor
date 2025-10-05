@@ -60,7 +60,7 @@
                                 @if (isWooCommerceSyncRunning)
                                 {
                                     <MudProgressCircular Class="ms-n1" Size="Size.Small" Indeterminate="true" />
-                                    <MudText Class="ms-2" Style="color: white;">Running WooCommerce Sync...</MudText>
+                                    <MudText Class="ms-2" Style="color: white;">Running...</MudText>
                                 }
                                 else
                                 {
@@ -113,6 +113,43 @@
                         <MudAlert Severity="@lastSyncSeverity" Class="mt-3">
                             @lastSyncMessage
                         </MudAlert>
+                    }
+
+                    @if (isWooCommerceSyncRunning && currentPage > 0)
+                    {
+                        <MudCard Class="mt-3">
+                            <MudCardContent>
+                                <MudText Typo="Typo.body2" GutterBottom="true">
+                                    <strong>Page-by-Page Progress:</strong>
+                                </MudText>
+                                <MudGrid>
+                                    <MudItem xs="6" sm="3">
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">Current Page</MudText>
+                                        <MudText Typo="Typo.body1"><strong>@currentPage</strong></MudText>
+                                    </MudItem>
+                                    <MudItem xs="6" sm="3">
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">Total Fetched</MudText>
+                                        <MudText Typo="Typo.body1"><strong>@totalFetched</strong></MudText>
+                                    </MudItem>
+                                    <MudItem xs="6" sm="3">
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">Created</MudText>
+                                        <MudText Typo="Typo.body1" Color="Color.Success"><strong>@totalCreated</strong></MudText>
+                                    </MudItem>
+                                    <MudItem xs="6" sm="3">
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">Skipped</MudText>
+                                        <MudText Typo="Typo.body1" Color="Color.Warning"><strong>@totalSkipped</strong></MudText>
+                                    </MudItem>
+                                </MudGrid>
+                                <MudButton Variant="Variant.Outlined"
+                                          Color="Color.Error"
+                                          Size="Size.Small"
+                                          StartIcon="@Icons.Material.Filled.Cancel"
+                                          OnClick="@CancelWooCommerceSync"
+                                          Class="mt-3">
+                                    Cancel Sync
+                                </MudButton>
+                            </MudCardContent>
+                        </MudCard>
                     }
                 </MudCardContent>
             </MudCard>

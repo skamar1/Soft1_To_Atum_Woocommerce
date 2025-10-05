@@ -22,7 +22,9 @@
       "Bash(git commit:*)",
       "Bash(gh repo create:*)",
       "Bash(find:*)",
-      "Bash(dotnet ef database:*)"
+      "Bash(dotnet ef database:*)",
+      "Bash(git push:*)",
+      "Bash(awk:*)"
     ]
   }
 }

@@ -192,14 +192,18 @@ public class AtumApiService
 
         var jsonOptions = new JsonSerializerOptions
         {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            PropertyNamingPolicy = null, // Use JsonPropertyName attributes instead of auto-conversion
             PropertyNameCaseInsensitive = true,
             WriteIndented = true,
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         };
 
         var jsonContent = JsonSerializer.Serialize(batchRequest, jsonOptions);
-        _logger.LogDebug("Batch request JSON: {Json}", jsonContent);
+
+        // Log as Information instead of Debug so it's always visible
+        _logger.LogInformation("=== ATUM BATCH REQUEST JSON ===");
+        _logger.LogInformation("{Json}", jsonContent);
+        _logger.LogInformation("=== END BATCH REQUEST JSON ===");
 
         var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
