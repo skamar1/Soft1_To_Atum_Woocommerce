@@ -1286,6 +1286,75 @@ settingsGroup.MapGet("/test/{service}", async (string service, SettingsService s
 .WithSummary("Test connection to external services")
 .WithDescription("Tests the connection and authentication for the specified external service (softone, woocommerce, atum, email)");
 
+settingsGroup.MapGet("/export", async (SettingsService settingsService, ILogger<Program> logger) =>
+{
+    logger.LogInformation("Exporting settings configuration for Windows Service");
+
+    try
+    {
+        var appSettings = await settingsService.GetAppSettingsAsync();
+
+        // Create configuration object for Windows Service
+        var exportConfig = new
+        {
+            SoftOne = new
+            {
+                BaseUrl = appSettings.SoftOneGoBaseUrl,
+                Token = appSettings.SoftOneGoToken,
+                AppId = appSettings.SoftOneGoAppId,
+                S1Code = appSettings.SoftOneGoS1Code
+            },
+            WooCommerce = new
+            {
+                ConsumerKey = appSettings.WooCommerceConsumerKey,
+                ConsumerSecret = appSettings.WooCommerceConsumerSecret
+            },
+            ATUM = new
+            {
+                LocationId = appSettings.AtumLocationId,
+                LocationName = appSettings.AtumLocationName
+            },
+            Email = new
+            {
+                SmtpHost = appSettings.EmailSmtpHost,
+                SmtpPort = appSettings.EmailSmtpPort,
+                Username = appSettings.EmailUsername,
+                Password = appSettings.EmailPassword, // Include actual password for service
+                FromEmail = appSettings.EmailFromEmail,
+                ToEmail = appSettings.EmailToEmail,
+                EnableNotifications = appSettings.SyncEmailNotifications
+            },
+            SyncSettings = new
+            {
+                IntervalMinutes = 10, // Default sync interval
+                EnableAutoSync = true,
+                BatchSize = 50
+            }
+        };
+
+        var json = JsonSerializer.Serialize(exportConfig, new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        });
+
+        var bytes = Encoding.UTF8.GetBytes(json);
+        var fileName = $"appsettings.Soft1ToAtum.{DateTime.Now:yyyyMMdd-HHmmss}.json";
+
+        logger.LogInformation("Settings exported successfully to {FileName}", fileName);
+
+        return Results.File(bytes, "application/json", fileName);
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Error exporting settings: {Message}", ex.Message);
+        return Results.Problem("Failed to export settings");
+    }
+})
+.WithName("ExportSettings")
+.WithSummary("Export settings configuration for Windows Service")
+.WithDescription("Exports current settings as a JSON file that can be used by the Windows Service");
+
 // Add endpoint for getting product statistics by source
 productsGroup.MapGet("/statistics", async (SyncDbContext db, ILogger<Program> logger) =>
 {

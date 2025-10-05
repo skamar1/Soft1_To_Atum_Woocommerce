@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Components;
+using Microsoft.JSInterop;
 using MudBlazor;
 using Soft1_To_Atum.Data.Models;
 using Soft1_To_Atum.Blazor.Services;
@@ -10,11 +11,13 @@ public partial class Settings : ComponentBase
     [Inject] private SyncApiClient SyncApi { get; set; } = default!;
     [Inject] private ISnackbar Snackbar { get; set; } = default!;
     [Inject] private ILogger<Settings> Logger { get; set; } = default!;
+    [Inject] private IJSRuntime JSRuntime { get; set; } = default!;
 
     private ApiSettingsModel? settings;
     private bool isSaving = false;
     private bool isTestingConnection = false;
     private bool isTestingEmail = false;
+    private bool isExporting = false;
     private string testingService = string.Empty;
 
     protected override void OnInitialized()
@@ -272,6 +275,45 @@ public partial class Settings : ComponentBase
             isTestingEmail = false;
             StateHasChanged(); // Force UI update
             Logger.LogInformation("=== TEST EMAIL END ===");
+        }
+    }
+
+    private async Task ExportSettings()
+    {
+        Logger.LogInformation("=== EXPORT SETTINGS START ===");
+        Logger.LogInformation("User clicked Export Settings button");
+
+        if (settings == null)
+        {
+            Logger.LogWarning("ExportSettings called but settings is null");
+            Snackbar.Add("Settings not loaded. Please save settings first.", Severity.Warning);
+            return;
+        }
+
+        isExporting = true;
+        StateHasChanged();
+
+        try
+        {
+            Logger.LogInformation("Opening export endpoint in new window");
+
+            // Open the export endpoint in a new tab/window - this will trigger the download
+            var exportUrl = "/api/settings/export";
+            await JSRuntime.InvokeVoidAsync("open", exportUrl, "_blank");
+
+            Snackbar.Add("Settings exported successfully! Check your downloads.", Severity.Success);
+            Logger.LogInformation("Export successful");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error exporting settings: {Message}", ex.Message);
+            Snackbar.Add($"Error exporting settings: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            isExporting = false;
+            StateHasChanged();
+            Logger.LogInformation("=== EXPORT SETTINGS END ===");
         }
     }
 }

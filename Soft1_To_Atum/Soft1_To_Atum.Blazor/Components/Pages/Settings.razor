@@ -374,36 +374,53 @@ else
 
         <!-- Action Buttons -->
         <MudItem xs="12">
-            <MudStack Row="true" Spacing="3" Justify="Justify.FlexEnd">
-                @* <MudButton StartIcon="@Icons.Material.Filled.BugReport"
+            <MudStack Row="true" Spacing="3" Justify="Justify.SpaceBetween">
+                <MudButton StartIcon="@Icons.Material.Filled.Download"
                          Color="Color.Info"
-                         Variant="Variant.Text"
-                         OnClick="@(async () => await TestApiConnection())"
-                         Size="Size.Small">
-                    Test API
-                </MudButton>
-                <MudButton StartIcon="@Icons.Material.Filled.Refresh"
-                         Color="Color.Secondary"
                          Variant="Variant.Outlined"
-                         OnClick="@(async () => await LoadSettings())"
-                         Disabled="isSaving">
-                    Reset
-                </MudButton> *@
-                <MudButton StartIcon="@Icons.Material.Filled.Save"
-                         Color="Color.Primary"
-                         Variant="Variant.Filled"
-                         OnClick="@(async () => await SaveSettings())"
-                         Disabled="isSaving">
-                    @if (isSaving)
+                         OnClick="@ExportSettings"
+                         Disabled="isExporting">
+                    @if (isExporting)
                     {
                         <MudProgressCircular Size="Size.Small" Indeterminate="true" />
-                        <span class="ml-2">Saving...</span>
+                        <span class="ml-2">Exporting...</span>
                     }
                     else
                     {
-                        <span>Save Settings</span>
+                        <span>Export for Windows Service</span>
                     }
                 </MudButton>
+                <MudStack Row="true" Spacing="3">
+                    @* <MudButton StartIcon="@Icons.Material.Filled.BugReport"
+                             Color="Color.Info"
+                             Variant="Variant.Text"
+                             OnClick="@(async () => await TestApiConnection())"
+                             Size="Size.Small">
+                        Test API
+                    </MudButton>
+                    <MudButton StartIcon="@Icons.Material.Filled.Refresh"
+                             Color="Color.Secondary"
+                             Variant="Variant.Outlined"
+                             OnClick="@(async () => await LoadSettings())"
+                             Disabled="isSaving">
+                        Reset
+                    </MudButton> *@
+                    <MudButton StartIcon="@Icons.Material.Filled.Save"
+                             Color="Color.Primary"
+                             Variant="Variant.Filled"
+                             OnClick="@(async () => await SaveSettings())"
+                             Disabled="isSaving">
+                        @if (isSaving)
+                        {
+                            <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+                            <span class="ml-2">Saving...</span>
+                        }
+                        else
+                        {
+                            <span>Save Settings</span>
+                        }
+                    </MudButton>
+                </MudStack>
             </MudStack>
         </MudItem>
     </MudGrid>
