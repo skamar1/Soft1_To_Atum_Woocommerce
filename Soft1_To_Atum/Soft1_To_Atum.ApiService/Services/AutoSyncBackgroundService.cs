@@ -162,37 +162,23 @@ public class AutoSyncBackgroundService : BackgroundService
     {
         try
         {
-            var dbContext = serviceProvider.GetRequiredService<SyncDbContext>();
-            var settingsService = serviceProvider.GetRequiredService<SettingsService>();
-            var storeSettingsService = serviceProvider.GetRequiredService<StoreSettingsService>();
-            var productMatchingService = serviceProvider.GetRequiredService<ProductMatchingService>();
+            // Call the internal API endpoint
+            using var client = new HttpClient();
+            client.BaseAddress = new Uri("http://localhost:5465");
 
-            var settings = await settingsService.GetAppSettingsAsync();
-            var store = await storeSettingsService.GetStoreByIdAsync(storeId);
+            var response = await client.PostAsync($"/api/sync/softone-to-database?storeId={storeId}", null, cancellationToken);
 
-            if (store == null || string.IsNullOrEmpty(store.SoftOneGoToken))
+            if (response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Store {StoreId} not found or SoftOne token not configured", storeId);
-                return;
+                var result = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogInformation("SoftOne sync for store {StoreId} completed successfully", storeId);
             }
-
-            // Call SoftOne API
-            var client = new HttpClient();
-            var request = new HttpRequestMessage(HttpMethod.Post, $"{store.SoftOneGoBaseUrl}/list/item");
-            request.Headers.Add("s1code", store.SoftOneGoS1Code);
-            var content = new StringContent(
-                $"{{\n    \"appId\": \"{store.SoftOneGoAppId}\",\n    \"filters\": \"{store.SoftOneGoFilters ?? "ITEM.MTRL_ITEMTRDATA_QTY1=1&ITEM.MTRL_ITEMTRDATA_QTY1_TO=9999"}\",\n    \"token\": \"{store.SoftOneGoToken}\"\n}}",
-                null,
-                "application/json");
-            request.Content = content;
-
-            var response = await client.SendAsync(request, cancellationToken);
-            response.EnsureSuccessStatusCode();
-
-            // Parse and process products (simplified version - you may want to reuse the full logic from Program.cs)
-            var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-
-            _logger.LogInformation("SoftOne sync for store {StoreId} completed", storeId);
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogError("SoftOne sync for store {StoreId} failed with status {StatusCode}: {Error}",
+                    storeId, response.StatusCode, error);
+            }
         }
         catch (Exception ex)
         {
@@ -205,45 +191,23 @@ public class AutoSyncBackgroundService : BackgroundService
     {
         try
         {
-            var settingsService = serviceProvider.GetRequiredService<SettingsService>();
-            var storeSettingsService = serviceProvider.GetRequiredService<StoreSettingsService>();
-            var atumApiService = serviceProvider.GetRequiredService<AtumApiService>();
-            var productMatchingService = serviceProvider.GetRequiredService<ProductMatchingService>();
+            // Call the internal API endpoint
+            using var client = new HttpClient();
+            client.BaseAddress = new Uri("http://localhost:5465");
 
-            var settings = await settingsService.GetAppSettingsAsync();
-            var store = await storeSettingsService.GetStoreByIdAsync(storeId);
+            var response = await client.PostAsync($"/api/sync/atum?storeId={storeId}", null, cancellationToken);
 
-            if (store == null)
+            if (response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Store {StoreId} not found", storeId);
-                return;
+                var result = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogInformation("ATUM sync for store {StoreId} completed successfully", storeId);
             }
-
-            // Fetch ATUM inventory
-            var atumItems = await atumApiService.GetAllInventoryAsync(
-                settings.WooCommerceConsumerKey,
-                settings.WooCommerceConsumerSecret,
-                store.AtumLocationId,
-                cancellationToken);
-
-            _logger.LogInformation("Retrieved {Count} items from ATUM for store {StoreId}", atumItems.Count, storeId);
-
-            // Process ATUM items
-            int processedCount = 0;
-            foreach (var atumItem in atumItems)
+            else
             {
-                try
-                {
-                    await productMatchingService.ProcessAtumProductAsync(atumItem, storeId, cancellationToken);
-                    processedCount++;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error processing ATUM item {AtumId}", atumItem.Id);
-                }
+                var error = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogError("ATUM sync for store {StoreId} failed with status {StatusCode}: {Error}",
+                    storeId, response.StatusCode, error);
             }
-
-            _logger.LogInformation("ATUM sync for store {StoreId} completed. Processed {Count} items", storeId, processedCount);
         }
         catch (Exception ex)
         {
@@ -256,15 +220,24 @@ public class AutoSyncBackgroundService : BackgroundService
     {
         try
         {
-            _logger.LogInformation("Full sync for store {StoreId} - this would run WooCommerce matching and ATUM updates", storeId);
+            // Call the internal API endpoint
+            using var client = new HttpClient();
+            client.BaseAddress = new Uri("http://localhost:5465");
+            client.Timeout = TimeSpan.FromMinutes(30); // Full sync can take a long time
 
-            // TODO: Implement full sync logic similar to /api/sync/test-read-products endpoint
-            // This would involve:
-            // 1. Get products from database for this store
-            // 2. Match/create in WooCommerce
-            // 3. Create/update in ATUM
+            var response = await client.GetAsync($"/api/sync/test-read-products?storeId={storeId}", cancellationToken);
 
-            await Task.Delay(100, cancellationToken); // Placeholder
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogInformation("Full sync for store {StoreId} completed successfully", storeId);
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogError("Full sync for store {StoreId} failed with status {StatusCode}: {Error}",
+                    storeId, response.StatusCode, error);
+            }
         }
         catch (Exception ex)
         {
