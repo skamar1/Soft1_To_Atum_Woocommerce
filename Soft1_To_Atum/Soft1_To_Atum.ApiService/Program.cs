@@ -21,6 +21,7 @@ builder.Services.AddDbContext<SyncDbContext>(options =>
 
 // Add services
 builder.Services.AddScoped<SettingsService>();
+builder.Services.AddScoped<StoreSettingsService>();
 builder.Services.AddScoped<SoftOneApiService>();
 builder.Services.AddScoped<AtumApiService>();
 builder.Services.AddScoped<WooCommerceApiService>();
@@ -222,6 +223,7 @@ syncGroup.MapGet("/test-read-products", async (
     WooCommerceApiService wooCommerceService,
     AtumApiService atumApiService,
     SettingsService settingsService,
+    StoreSettingsService storeSettingsService,
     ILogger<Program> logger,
     CancellationToken cancellationToken) =>
 {
@@ -237,8 +239,10 @@ syncGroup.MapGet("/test-read-products", async (
         var productsWithoutWooId = allProducts.Where(p => string.IsNullOrEmpty(p.WooCommerceId)).ToList();
         logger.LogInformation("Found {Count} products without WooCommerce ID", productsWithoutWooId.Count);
 
-        // 3. Get settings για WooCommerce credentials
+        // 3. Get settings για WooCommerce credentials και default store
         var settings = await settingsService.GetAppSettingsAsync();
+        var defaultStore = await storeSettingsService.GetDefaultStoreAsync();
+
         if (settings == null || string.IsNullOrEmpty(settings.WooCommerceConsumerKey))
         {
             logger.LogWarning("WooCommerce credentials not configured, skipping WooCommerce matching");
@@ -403,9 +407,9 @@ syncGroup.MapGet("/test-read-products", async (
                         var createItem = new AtumBatchCreateItem
                         {
                             ProductId = wooCommerceProductId,
-                            Name = settings.AtumLocationName ?? "store1_location", // Location name, not product name
+                            Name = defaultStore.AtumLocationName ?? "store1_location", // Location name, not product name
                             IsMain = false,
-                            Location = new List<int> { settings.AtumLocationId },
+                            Location = new List<int> { defaultStore.AtumLocationId },
                             MetaData = new AtumBatchMetaData
                             {
                                 Sku = product.Sku ?? "",
@@ -696,19 +700,37 @@ syncGroup.MapPost("/atum", async (
     SyncDbContext db,
     AtumApiService atumApiService,
     SettingsService settingsService,
+    StoreSettingsService storeSettingsService,
+    ProductMatchingService productMatchingService,
     ILogger<Program> logger,
+    int? storeId,
     CancellationToken cancellationToken) =>
 {
-    logger.LogInformation("=== ATUM SYNC: Reading from ATUM API and updating database ===");
+    logger.LogInformation("=== ATUM SYNC: Reading from ATUM API and updating database (Store ID: {StoreId}) ===", storeId);
 
     try
     {
-        // 1. Get settings
+        // 1. Validate storeId
+        if (!storeId.HasValue)
+        {
+            logger.LogError("Store ID is required for ATUM sync");
+            return Results.BadRequest(new { message = "Store ID is required" });
+        }
+
+        // 2. Get settings
         var settings = await settingsService.GetAppSettingsAsync();
+        var store = await storeSettingsService.GetStoreByIdAsync(storeId.Value);
+
         if (settings == null)
         {
             logger.LogError("Settings not found");
             return Results.Problem("Settings not configured");
+        }
+
+        if (store == null)
+        {
+            logger.LogError("Store {StoreId} not found", storeId.Value);
+            return Results.NotFound(new { message = $"Store {storeId.Value} not found" });
         }
 
         if (string.IsNullOrEmpty(settings.WooCommerceConsumerKey) || string.IsNullOrEmpty(settings.WooCommerceConsumerSecret))
@@ -717,12 +739,12 @@ syncGroup.MapPost("/atum", async (
             return Results.Problem("WooCommerce credentials not configured");
         }
 
-        // 2. Fetch all ATUM inventory
-        logger.LogInformation("Fetching all ATUM inventory for location {LocationId}", settings.AtumLocationId);
+        // 3. Fetch all ATUM inventory
+        logger.LogInformation("Fetching all ATUM inventory for store {StoreId}, location {LocationId}", storeId.Value, store.AtumLocationId);
         var atumItems = await atumApiService.GetAllInventoryAsync(
             settings.WooCommerceConsumerKey,
             settings.WooCommerceConsumerSecret,
-            settings.AtumLocationId,
+            store.AtumLocationId,
             cancellationToken);
 
         logger.LogInformation("Retrieved {Count} items from ATUM API", atumItems.Count);
@@ -739,64 +761,50 @@ syncGroup.MapPost("/atum", async (
             });
         }
 
-        // 3. Update database with ATUM data
+        // 4. Process ATUM items using ProductMatchingService
         int matchedCount = 0;
-        int notFoundCount = 0;
+        int createdCount = 0;
+        int errorCount = 0;
 
         foreach (var atumItem in atumItems)
         {
             try
             {
-                var sku = atumItem.GetSku();
-                if (string.IsNullOrEmpty(sku))
+                var result = await productMatchingService.ProcessAtumProductAsync(atumItem, storeId.Value, cancellationToken);
+
+                if (result.Success)
                 {
-                    logger.LogWarning("ATUM item {AtumId} has no SKU, skipping", atumItem.Id);
-                    notFoundCount++;
-                    continue;
-                }
+                    if (result.Action == ProductAction.Created)
+                        createdCount++;
+                    else if (result.Action == ProductAction.Updated)
+                        matchedCount++;
 
-                // Find product in database by SKU
-                var product = await db.Products.FirstOrDefaultAsync(p => p.Sku == sku, cancellationToken);
-
-                if (product != null)
-                {
-                    // Update with ATUM data
-                    product.AtumId = atumItem.Id.ToString();
-                    product.AtumQuantity = atumItem.GetStockQuantity();
-                    product.UpdatedAt = DateTime.UtcNow;
-                    product.LastSyncedAt = DateTime.UtcNow;
-                    product.LastSyncStatus = "ATUM: Updated";
-
-                    matchedCount++;
-                    logger.LogDebug("Updated product {Name} (SKU: {Sku}) with ATUM ID: {AtumId}, Quantity: {Quantity}",
-                        product.Name, sku, atumItem.Id, atumItem.GetStockQuantity());
+                    logger.LogDebug("Processed ATUM item {AtumId}: {Action}", atumItem.Id, result.Action);
                 }
                 else
                 {
-                    notFoundCount++;
-                    logger.LogWarning("Product with SKU {Sku} not found in database (ATUM ID: {AtumId})",
-                        sku, atumItem.Id);
+                    errorCount++;
+                    logger.LogWarning("Failed to process ATUM item {AtumId}: {ErrorMessage}", atumItem.Id, result.ErrorMessage);
                 }
             }
             catch (Exception ex)
             {
+                errorCount++;
                 logger.LogError(ex, "Error processing ATUM item {AtumId}", atumItem.Id);
-                notFoundCount++;
             }
         }
 
-        // 4. Save changes to database
-        await db.SaveChangesAsync(cancellationToken);
-        logger.LogInformation("Saved changes to database: {Matched} matched, {NotFound} not found",
-            matchedCount, notFoundCount);
+        logger.LogInformation("ATUM sync completed: Created={Created}, Updated={Updated}, Errors={Errors}",
+            createdCount, matchedCount, errorCount);
 
         return Results.Ok(new
         {
             Success = true,
             TotalAtumItems = atumItems.Count,
-            MatchedInDatabase = matchedCount,
-            NotFoundInDatabase = notFoundCount,
-            Message = $"ATUM sync completed: {matchedCount} products updated, {notFoundCount} not found in database"
+            Created = createdCount,
+            Updated = matchedCount,
+            Errors = errorCount,
+            Message = $"ATUM sync completed: {createdCount} products created, {matchedCount} updated, {errorCount} errors"
         });
     }
     catch (Exception ex)
@@ -813,36 +821,52 @@ syncGroup.MapPost("/atum", async (
 syncGroup.MapPost("/softone-to-database", async (
     SyncDbContext db,
     SettingsService settingsService,
+    StoreSettingsService storeSettingsService,
     ProductMatchingService productMatchingService,
     ILogger<Program> logger,
+    int? storeId,
     CancellationToken cancellationToken) =>
 {
-    logger.LogInformation("=== ΒΗΜΑ 2: Fetch SoftOne → Database ===");
+    logger.LogInformation("=== ΒΗΜΑ 2: Fetch SoftOne → Database (Store ID: {StoreId}) ===", storeId);
 
     try
     {
-        // 1. Get settings
+        // 1. Validate storeId
+        if (!storeId.HasValue)
+        {
+            logger.LogError("Store ID is required for sync");
+            return Results.BadRequest(new { message = "Store ID is required" });
+        }
+
+        // 2. Get settings
         var settings = await settingsService.GetAppSettingsAsync();
+        var store = await storeSettingsService.GetStoreByIdAsync(storeId.Value);
+
         if (settings == null)
         {
             logger.LogError("Settings not found");
             return Results.Problem("Settings not configured");
         }
 
-        var apiSettings = settings.ToApiModel();
-        if (string.IsNullOrEmpty(apiSettings.SoftOneGo.Token))
+        if (store == null)
         {
-            logger.LogError("SoftOne Go token is not configured");
+            logger.LogError("Store {StoreId} not found", storeId.Value);
+            return Results.NotFound(new { message = $"Store {storeId.Value} not found" });
+        }
+
+        if (string.IsNullOrEmpty(store.SoftOneGoToken))
+        {
+            logger.LogError("SoftOne Go token is not configured for store {StoreId}", storeId.Value);
             return Results.Problem("SoftOne Go token not configured");
         }
 
-        // 2. Call SoftOne API
-        logger.LogInformation("Calling SoftOne API...");
+        // 3. Call SoftOne API
+        logger.LogInformation("Calling SoftOne API for store {StoreId}...", storeId.Value);
         var client = new HttpClient();
-        var request = new HttpRequestMessage(HttpMethod.Post, $"{apiSettings.SoftOneGo.BaseUrl}/list/item");
-        request.Headers.Add("s1code", apiSettings.SoftOneGo.S1Code);
+        var request = new HttpRequestMessage(HttpMethod.Post, $"{store.SoftOneGoBaseUrl}/list/item");
+        request.Headers.Add("s1code", store.SoftOneGoS1Code);
         var content = new StringContent(
-            $"{{\n    \"appId\": \"703\",\n    \"filters\": \"ITEM.MTRL_ITEMTRDATA_QTY1=1&ITEM.MTRL_ITEMTRDATA_QTY1_TO=9999\",\n    \"token\": \"{apiSettings.SoftOneGo.Token}\"\n}}",
+            $"{{\n    \"appId\": \"{store.SoftOneGoAppId}\",\n    \"filters\": \"{store.SoftOneGoFilters ?? "ITEM.MTRL_ITEMTRDATA_QTY1=1&ITEM.MTRL_ITEMTRDATA_QTY1_TO=9999"}\",\n    \"token\": \"{store.SoftOneGoToken}\"\n}}",
             null,
             "application/json");
         request.Content = content;
@@ -934,7 +958,7 @@ syncGroup.MapPost("/softone-to-database", async (
         {
             try
             {
-                var result = await productMatchingService.ProcessSoftOneProductAsync(product, cancellationToken);
+                var result = await productMatchingService.ProcessSoftOneProductAsync(product, storeId.Value, cancellationToken);
 
                 if (result.Success)
                 {
@@ -982,17 +1006,25 @@ syncGroup.MapPost("/softone-to-database", async (
 .WithSummary("ΒΗΜΑ 2: Fetch από SoftOne API και αποθήκευση στη βάση")
 .WithDescription("Καλεί το SoftOne API, παίρνει προϊόντα, και τα αποθηκεύει/ενημερώνει στη βάση μας");
 
-productsGroup.MapGet("/", async (SyncDbContext db, int page = 1, int pageSize = 50) =>
+productsGroup.MapGet("/", async (SyncDbContext db, int page = 1, int pageSize = 50, int? storeId = null) =>
 {
     try
     {
-        var products = await db.Products
+        var query = db.Products.AsQueryable();
+
+        // Filter by store if storeId is provided
+        if (storeId.HasValue)
+        {
+            query = query.Where(p => p.StoreSettingsId == storeId.Value);
+        }
+
+        var products = await query
             .OrderByDescending(p => p.LastSyncedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync();
 
-        var total = await db.Products.CountAsync();
+        var total = await query.CountAsync();
 
         // Map to ProductResponse for consistent API
         var productResponses = products.Select(p => new ProductResponse
@@ -1065,27 +1097,102 @@ productsGroup.MapGet("/{id:int}", async (int id, SyncDbContext db) =>
 .WithSummary("Get a specific product by ID")
 .WithDescription("Retrieves detailed information about a specific product");
 
-storesGroup.MapGet("/", async (SyncDbContext db) =>
+// Store Settings Management endpoints
+storesGroup.MapGet("/", async (StoreSettingsService storeSettingsService) =>
 {
-    var stores = await db.Stores
-        .Where(s => s.IsActive)
-        .Select(s => new
-        {
-            s.Id,
-            s.Name,
-            s.WooCommerceUrl,
-            s.IsActive,
-            s.LastSyncAt,
-            s.CreatedAt
-        })
-        .ToListAsync();
-
-    return Results.Ok(stores);
+    var stores = await storeSettingsService.GetAllStoresAsync();
+    var storeModels = stores.Select(s => s.ToApiModel()).ToList();
+    return Results.Ok(storeModels);
 })
-.WithName("GetStores")
-.WithSummary("Get list of active stores")
-.WithDescription("Retrieves all active WooCommerce stores configured for synchronization");
+.WithName("GetAllStores")
+.WithSummary("Get all store settings")
+.WithDescription("Retrieves all configured stores with their SoftOne Go and ATUM settings");
 
+storesGroup.MapGet("/{id:int}", async (int id, StoreSettingsService storeSettingsService) =>
+{
+    var store = await storeSettingsService.GetStoreByIdAsync(id);
+    if (store == null)
+    {
+        return Results.NotFound(new { message = $"Store with ID {id} not found" });
+    }
+    return Results.Ok(store.ToApiModel());
+})
+.WithName("GetStoreById")
+.WithSummary("Get store settings by ID")
+.WithDescription("Retrieves specific store configuration by ID");
+
+storesGroup.MapPost("/", async (StoreSettingsApiModel storeModel, StoreSettingsService storeSettingsService, ILogger<Program> logger) =>
+{
+    logger.LogInformation("Creating new store: {StoreName}", storeModel.Name);
+
+    var newStore = new StoreSettings
+    {
+        StoreName = storeModel.Name,
+        StoreEnabled = storeModel.Enabled,
+        SoftOneGoBaseUrl = storeModel.SoftOneGo.BaseUrl,
+        SoftOneGoAppId = storeModel.SoftOneGo.AppId,
+        SoftOneGoToken = storeModel.SoftOneGo.Token,
+        SoftOneGoS1Code = storeModel.SoftOneGo.S1Code,
+        SoftOneGoFilters = storeModel.SoftOneGo.Filters,
+        AtumLocationId = storeModel.ATUM.LocationId,
+        AtumLocationName = storeModel.ATUM.LocationName
+    };
+
+    var created = await storeSettingsService.CreateStoreAsync(newStore);
+    logger.LogInformation("Store created with ID: {StoreId}", created.Id);
+
+    return Results.Created($"/api/stores/{created.Id}", created.ToApiModel());
+})
+.WithName("CreateStore")
+.WithSummary("Create new store")
+.WithDescription("Creates a new store with SoftOne Go and ATUM configuration");
+
+storesGroup.MapPut("/{id:int}", async (int id, StoreSettingsApiModel storeModel, StoreSettingsService storeSettingsService, ILogger<Program> logger) =>
+{
+    logger.LogInformation("Updating store {StoreId}: {StoreName}", id, storeModel.Name);
+
+    var updatedStore = new StoreSettings
+    {
+        StoreName = storeModel.Name,
+        StoreEnabled = storeModel.Enabled,
+        SoftOneGoBaseUrl = storeModel.SoftOneGo.BaseUrl,
+        SoftOneGoAppId = storeModel.SoftOneGo.AppId,
+        SoftOneGoToken = storeModel.SoftOneGo.Token,
+        SoftOneGoS1Code = storeModel.SoftOneGo.S1Code,
+        SoftOneGoFilters = storeModel.SoftOneGo.Filters,
+        AtumLocationId = storeModel.ATUM.LocationId,
+        AtumLocationName = storeModel.ATUM.LocationName
+    };
+
+    var result = await storeSettingsService.UpdateStoreAsync(id, updatedStore);
+    if (result == null)
+    {
+        return Results.NotFound(new { message = $"Store with ID {id} not found" });
+    }
+
+    logger.LogInformation("Store {StoreId} updated successfully", id);
+    return Results.Ok(result.ToApiModel());
+})
+.WithName("UpdateStore")
+.WithSummary("Update store settings")
+.WithDescription("Updates an existing store's configuration");
+
+storesGroup.MapDelete("/{id:int}", async (int id, StoreSettingsService storeSettingsService, ILogger<Program> logger) =>
+{
+    logger.LogInformation("Deleting store {StoreId}", id);
+
+    var deleted = await storeSettingsService.DeleteStoreAsync(id);
+    if (!deleted)
+    {
+        return Results.NotFound(new { message = $"Store with ID {id} not found" });
+    }
+
+    logger.LogInformation("Store {StoreId} deleted successfully", id);
+    return Results.Ok(new { message = "Store deleted successfully" });
+})
+.WithName("DeleteStore")
+.WithSummary("Delete store")
+.WithDescription("Deletes a store (or disables it if it has associated products)");
 
 // Settings endpoints
 settingsGroup.MapGet("/", async (SettingsService settingsService, ILogger<Program> logger) =>
@@ -1136,7 +1243,7 @@ settingsGroup.MapPut("/", async (HttpContext context, SettingsService settingsSe
             return Results.BadRequest("Invalid settings data");
         }
 
-        logger.LogDebug("Successfully deserialized settings for store: {StoreName}", settings.Name);
+        logger.LogDebug("Successfully deserialized global settings");
 
         // Get existing settings from database
         var appSettings = await settingsService.GetAppSettingsAsync();
@@ -1147,7 +1254,7 @@ settingsGroup.MapPut("/", async (HttpContext context, SettingsService settingsSe
         // Save to database
         await settingsService.UpdateAppSettingsAsync(appSettings);
 
-        logger.LogInformation("Settings updated successfully in database for store: {StoreName}", settings.Name);
+        logger.LogInformation("Global settings updated successfully in database");
         return Results.Ok(new { message = "Settings updated successfully" });
     }
     catch (JsonException ex)
@@ -1165,7 +1272,7 @@ settingsGroup.MapPut("/", async (HttpContext context, SettingsService settingsSe
 .WithSummary("Update application settings")
 .WithDescription("Updates the configuration settings for integrated services");
 
-settingsGroup.MapGet("/test/{service}", async (string service, SettingsService settingsService, SoftOneApiService softOneApiService, EmailService emailService, ILogger<Program> logger) =>
+settingsGroup.MapGet("/test/{service}", async (string service, SettingsService settingsService, StoreSettingsService storeSettingsService, SoftOneApiService softOneApiService, EmailService emailService, ILogger<Program> logger) =>
 {
     logger.LogDebug("Testing connection for service: {Service}", service);
 
@@ -1173,15 +1280,16 @@ settingsGroup.MapGet("/test/{service}", async (string service, SettingsService s
     {
         // Get settings from database
         var appSettings = await settingsService.GetAppSettingsAsync();
+        var defaultStore = await storeSettingsService.GetDefaultStoreAsync();
 
         switch (service.ToLower())
         {
             case "softone":
                 // Check if required fields are present
-                if (string.IsNullOrEmpty(appSettings.SoftOneGoBaseUrl) ||
-                    string.IsNullOrEmpty(appSettings.SoftOneGoToken) ||
-                    string.IsNullOrEmpty(appSettings.SoftOneGoAppId) ||
-                    string.IsNullOrEmpty(appSettings.SoftOneGoS1Code))
+                if (string.IsNullOrEmpty(defaultStore.SoftOneGoBaseUrl) ||
+                    string.IsNullOrEmpty(defaultStore.SoftOneGoToken) ||
+                    string.IsNullOrEmpty(defaultStore.SoftOneGoAppId) ||
+                    string.IsNullOrEmpty(defaultStore.SoftOneGoS1Code))
                 {
                     logger.LogWarning("SoftOne connection test failed - missing configuration");
                     return Results.BadRequest(new { message = "SoftOne connection failed - missing configuration" });
@@ -1190,10 +1298,10 @@ settingsGroup.MapGet("/test/{service}", async (string service, SettingsService s
                 // Test actual connection to SoftOne API
                 logger.LogInformation("Testing actual SoftOne API connection...");
                 var softOneResult = await softOneApiService.TestConnectionAsync(
-                    appSettings.SoftOneGoBaseUrl,
-                    appSettings.SoftOneGoAppId,
-                    appSettings.SoftOneGoToken,
-                    appSettings.SoftOneGoS1Code
+                    defaultStore.SoftOneGoBaseUrl,
+                    defaultStore.SoftOneGoAppId,
+                    defaultStore.SoftOneGoToken,
+                    defaultStore.SoftOneGoS1Code
                 );
 
                 if (softOneResult)
@@ -1225,7 +1333,7 @@ settingsGroup.MapGet("/test/{service}", async (string service, SettingsService s
             case "atum":
                 // Simulate ATUM test (can be implemented later)
                 await Task.Delay(500);
-                var atumValid = appSettings.AtumLocationId > 0;
+                var atumValid = defaultStore.AtumLocationId > 0;
                 if (atumValid)
                 {
                     logger.LogInformation("ATUM connection test successful (simulated)");
@@ -1286,23 +1394,24 @@ settingsGroup.MapGet("/test/{service}", async (string service, SettingsService s
 .WithSummary("Test connection to external services")
 .WithDescription("Tests the connection and authentication for the specified external service (softone, woocommerce, atum, email)");
 
-settingsGroup.MapGet("/export", async (SettingsService settingsService, ILogger<Program> logger) =>
+settingsGroup.MapGet("/export", async (SettingsService settingsService, StoreSettingsService storeSettingsService, ILogger<Program> logger) =>
 {
     logger.LogInformation("Exporting settings configuration for Windows Service");
 
     try
     {
         var appSettings = await settingsService.GetAppSettingsAsync();
+        var defaultStore = await storeSettingsService.GetDefaultStoreAsync();
 
         // Create configuration object for Windows Service
         var exportConfig = new
         {
             SoftOne = new
             {
-                BaseUrl = appSettings.SoftOneGoBaseUrl,
-                Token = appSettings.SoftOneGoToken,
-                AppId = appSettings.SoftOneGoAppId,
-                S1Code = appSettings.SoftOneGoS1Code
+                BaseUrl = defaultStore.SoftOneGoBaseUrl,
+                Token = defaultStore.SoftOneGoToken,
+                AppId = defaultStore.SoftOneGoAppId,
+                S1Code = defaultStore.SoftOneGoS1Code
             },
             WooCommerce = new
             {
@@ -1311,8 +1420,8 @@ settingsGroup.MapGet("/export", async (SettingsService settingsService, ILogger<
             },
             ATUM = new
             {
-                LocationId = appSettings.AtumLocationId,
-                LocationName = appSettings.AtumLocationName
+                LocationId = defaultStore.AtumLocationId,
+                LocationName = defaultStore.AtumLocationName
             },
             Email = new
             {
