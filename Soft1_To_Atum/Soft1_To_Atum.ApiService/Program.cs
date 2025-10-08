@@ -168,6 +168,18 @@ var settingsGroup = app.MapGroup("/api/settings")
     .WithTags("Settings")
     .WithOpenApi();
 
+syncGroup.MapGet("/auto-sync-logs", async (SyncDbContext db) =>
+{
+    var logs = await db.AutoSyncLogs
+        .OrderByDescending(l => l.StartedAt)
+        .Take(20)
+        .ToListAsync();
+    return Results.Ok(logs);
+})
+.WithName("GetAutoSyncLogs")
+.WithSummary("Get the latest 20 auto-sync logs")
+.WithDescription("Retrieves the 20 most recent automatic synchronization logs");
+
 syncGroup.MapGet("/logs", async (SyncDbContext db) =>
 {
     var logs = await db.SyncLogs

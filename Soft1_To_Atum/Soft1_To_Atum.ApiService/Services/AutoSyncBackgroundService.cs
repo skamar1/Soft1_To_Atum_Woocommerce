@@ -1,6 +1,8 @@
 using Soft1_To_Atum.Data;
+using Soft1_To_Atum.Data.Models;
 using Soft1_To_Atum.Data.Services;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace Soft1_To_Atum.ApiService.Services;
 
@@ -88,14 +90,13 @@ public class AutoSyncBackgroundService : BackgroundService
 
     private async Task RunAutoSyncAsync(CancellationToken cancellationToken)
     {
+        AutoSyncLog? syncLog = null;
+
         try
         {
             using var scope = _serviceProvider.CreateScope();
             var dbContext = scope.ServiceProvider.GetRequiredService<SyncDbContext>();
             var storeSettingsService = scope.ServiceProvider.GetRequiredService<StoreSettingsService>();
-            var productMatchingService = scope.ServiceProvider.GetRequiredService<ProductMatchingService>();
-            var settingsService = scope.ServiceProvider.GetRequiredService<SettingsService>();
-            var atumApiService = scope.ServiceProvider.GetRequiredService<AtumApiService>();
 
             _logger.LogInformation("=== Starting Auto-Sync for all enabled stores ===");
 
@@ -111,37 +112,79 @@ public class AutoSyncBackgroundService : BackgroundService
 
             _logger.LogInformation("Found {Count} enabled stores for auto-sync", enabledStores.Count);
 
+            // Create sync log entry
+            syncLog = new AutoSyncLog
+            {
+                StartedAt = DateTime.UtcNow,
+                Status = "Running",
+                TotalStores = enabledStores.Count,
+                SuccessfulStores = 0,
+                FailedStores = 0
+            };
+            dbContext.AutoSyncLogs.Add(syncLog);
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            var storeResults = new Dictionary<string, object>();
+            int successCount = 0;
+            int failCount = 0;
+
             foreach (var store in enabledStores)
             {
                 if (cancellationToken.IsCancellationRequested)
                 {
                     _logger.LogWarning("Auto-sync cancelled during store processing");
+                    syncLog.Status = "Cancelled";
+                    syncLog.ErrorMessage = "Sync was cancelled during execution";
                     break;
                 }
 
                 _logger.LogInformation("=== Auto-Sync for Store: {StoreName} (ID: {StoreId}) ===", store.StoreName, store.Id);
 
+                var storeResult = new Dictionary<string, object>
+                {
+                    ["storeName"] = store.StoreName,
+                    ["storeId"] = store.Id
+                };
+
                 try
                 {
                     // Step 1: SoftOne Sync
                     _logger.LogInformation("Step 1/3: Running SoftOne sync for store {StoreId}", store.Id);
-                    await RunSoftOneSyncForStoreAsync(store.Id, scope.ServiceProvider, cancellationToken);
+                    var softOneSuccess = await RunSoftOneSyncForStoreAsync(store.Id, scope.ServiceProvider, cancellationToken);
+                    storeResult["softOneSync"] = softOneSuccess ? "Success" : "Failed";
 
                     // Step 2: ATUM Sync
                     _logger.LogInformation("Step 2/3: Running ATUM sync for store {StoreId}", store.Id);
-                    await RunAtumSyncForStoreAsync(store.Id, scope.ServiceProvider, cancellationToken);
+                    var atumSuccess = await RunAtumSyncForStoreAsync(store.Id, scope.ServiceProvider, cancellationToken);
+                    storeResult["atumSync"] = atumSuccess ? "Success" : "Failed";
 
                     // Step 3: Full Sync (WooCommerce + ATUM)
                     _logger.LogInformation("Step 3/3: Running Full sync for store {StoreId}", store.Id);
-                    await RunFullSyncForStoreAsync(store.Id, scope.ServiceProvider, cancellationToken);
+                    var fullSyncSuccess = await RunFullSyncForStoreAsync(store.Id, scope.ServiceProvider, cancellationToken);
+                    storeResult["fullSync"] = fullSyncSuccess ? "Success" : "Failed";
 
-                    _logger.LogInformation("Auto-sync completed successfully for store {StoreName}", store.StoreName);
+                    if (softOneSuccess && atumSuccess && fullSyncSuccess)
+                    {
+                        storeResult["status"] = "Success";
+                        successCount++;
+                        _logger.LogInformation("Auto-sync completed successfully for store {StoreName}", store.StoreName);
+                    }
+                    else
+                    {
+                        storeResult["status"] = "Partial";
+                        failCount++;
+                        _logger.LogWarning("Auto-sync completed with some failures for store {StoreName}", store.StoreName);
+                    }
                 }
                 catch (Exception ex)
                 {
+                    storeResult["status"] = "Failed";
+                    storeResult["error"] = ex.Message;
+                    failCount++;
                     _logger.LogError(ex, "Error during auto-sync for store {StoreName} (ID: {StoreId})", store.StoreName, store.Id);
-                    // Continue with next store even if this one fails
                 }
+
+                storeResults[store.Id.ToString()] = storeResult;
 
                 // Small delay between stores to avoid overwhelming the system
                 if (!cancellationToken.IsCancellationRequested)
@@ -150,15 +193,35 @@ public class AutoSyncBackgroundService : BackgroundService
                 }
             }
 
+            // Update sync log with results
+            syncLog.CompletedAt = DateTime.UtcNow;
+            syncLog.Status = syncLog.Status == "Cancelled" ? "Cancelled" : (failCount == 0 ? "Completed" : "Failed");
+            syncLog.SuccessfulStores = successCount;
+            syncLog.FailedStores = failCount;
+            syncLog.Details = JsonSerializer.Serialize(storeResults);
+            await dbContext.SaveChangesAsync(cancellationToken);
+
             _logger.LogInformation("=== Auto-Sync completed for all enabled stores ===");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Critical error during auto-sync execution");
+
+            if (syncLog != null)
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var dbContext = scope.ServiceProvider.GetRequiredService<SyncDbContext>();
+
+                syncLog.CompletedAt = DateTime.UtcNow;
+                syncLog.Status = "Failed";
+                syncLog.ErrorMessage = ex.Message;
+                dbContext.Update(syncLog);
+                await dbContext.SaveChangesAsync(CancellationToken.None);
+            }
         }
     }
 
-    private async Task RunSoftOneSyncForStoreAsync(int storeId, IServiceProvider serviceProvider, CancellationToken cancellationToken)
+    private async Task<bool> RunSoftOneSyncForStoreAsync(int storeId, IServiceProvider serviceProvider, CancellationToken cancellationToken)
     {
         try
         {
@@ -172,22 +235,24 @@ public class AutoSyncBackgroundService : BackgroundService
             {
                 var result = await response.Content.ReadAsStringAsync(cancellationToken);
                 _logger.LogInformation("SoftOne sync for store {StoreId} completed successfully", storeId);
+                return true;
             }
             else
             {
                 var error = await response.Content.ReadAsStringAsync(cancellationToken);
                 _logger.LogError("SoftOne sync for store {StoreId} failed with status {StatusCode}: {Error}",
                     storeId, response.StatusCode, error);
+                return false;
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error in SoftOne sync for store {StoreId}", storeId);
-            throw;
+            return false;
         }
     }
 
-    private async Task RunAtumSyncForStoreAsync(int storeId, IServiceProvider serviceProvider, CancellationToken cancellationToken)
+    private async Task<bool> RunAtumSyncForStoreAsync(int storeId, IServiceProvider serviceProvider, CancellationToken cancellationToken)
     {
         try
         {
@@ -201,22 +266,24 @@ public class AutoSyncBackgroundService : BackgroundService
             {
                 var result = await response.Content.ReadAsStringAsync(cancellationToken);
                 _logger.LogInformation("ATUM sync for store {StoreId} completed successfully", storeId);
+                return true;
             }
             else
             {
                 var error = await response.Content.ReadAsStringAsync(cancellationToken);
                 _logger.LogError("ATUM sync for store {StoreId} failed with status {StatusCode}: {Error}",
                     storeId, response.StatusCode, error);
+                return false;
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error in ATUM sync for store {StoreId}", storeId);
-            throw;
+            return false;
         }
     }
 
-    private async Task RunFullSyncForStoreAsync(int storeId, IServiceProvider serviceProvider, CancellationToken cancellationToken)
+    private async Task<bool> RunFullSyncForStoreAsync(int storeId, IServiceProvider serviceProvider, CancellationToken cancellationToken)
     {
         try
         {
@@ -231,18 +298,20 @@ public class AutoSyncBackgroundService : BackgroundService
             {
                 var result = await response.Content.ReadAsStringAsync(cancellationToken);
                 _logger.LogInformation("Full sync for store {StoreId} completed successfully", storeId);
+                return true;
             }
             else
             {
                 var error = await response.Content.ReadAsStringAsync(cancellationToken);
                 _logger.LogError("Full sync for store {StoreId} failed with status {StatusCode}: {Error}",
                     storeId, response.StatusCode, error);
+                return false;
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error in Full sync for store {StoreId}", storeId);
-            throw;
+            return false;
         }
     }
 

@@ -18,7 +18,7 @@ builder.Services.AddMudServices();
 // The API service has its own resilience policies and handles all retries/timeouts
 builder.Services.AddHttpClient<SyncApiClient>(client =>
 {
-    client.BaseAddress = new Uri("https://localhost:7463"); // ApiService URL - fixed, no service discovery needed
+    client.BaseAddress = new Uri("http://localhost:5465"); // ApiService URL - fixed, no service discovery needed
     client.Timeout = TimeSpan.FromMinutes(20); // Very long timeout - let the API service handle everything
 });
 

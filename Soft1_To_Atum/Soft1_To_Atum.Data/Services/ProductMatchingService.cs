@@ -27,6 +27,7 @@ public class ProductMatchingService
     /// </summary>
     public async Task<ProductMatchResult> ProcessSoftOneProductAsync(
         Dictionary<string, string?> softOneProduct,
+        int storeSettingsId,
         CancellationToken cancellationToken = default)
     {
         var mtrl = softOneProduct.GetValueOrDefault("ITEM.MTRL") ?? "";
@@ -109,12 +110,12 @@ public class ProductMatchingService
         else
         {
             // Create new product
-            var newProduct = CreateProductFromSoftOne(softOneProduct);
+            var newProduct = CreateProductFromSoftOne(softOneProduct, storeSettingsId);
 
             _context.Products.Add(newProduct);
             await _context.SaveChangesAsync(cancellationToken);
 
-            _logger.LogInformation("Created new product {ProductId} from SoftOne data", newProduct.Id);
+            _logger.LogInformation("Created new product {ProductId} from SoftOne data for store {StoreId}", newProduct.Id, storeSettingsId);
 
             return new ProductMatchResult
             {
@@ -173,10 +174,11 @@ public class ProductMatchingService
     /// <summary>
     /// Creates a new Product entity from SoftOne data
     /// </summary>
-    private Product CreateProductFromSoftOne(Dictionary<string, string?> softOneProduct)
+    private Product CreateProductFromSoftOne(Dictionary<string, string?> softOneProduct, int storeSettingsId)
     {
         var product = new Product
         {
+            StoreSettingsId = storeSettingsId,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             LastSyncedAt = DateTime.UtcNow,
@@ -195,6 +197,7 @@ public class ProductMatchingService
     /// </summary>
     public async Task<ProductMatchResult> ProcessAtumProductAsync(
         AtumInventoryItem atumItem,
+        int storeSettingsId,
         CancellationToken cancellationToken = default)
     {
         var atumId = atumItem.Id.ToString();
@@ -334,12 +337,12 @@ public class ProductMatchingService
             try
             {
                 // Create new product from ATUM data
-                var newProduct = await CreateProductFromAtumAsync(atumItem, cancellationToken);
+                var newProduct = await CreateProductFromAtumAsync(atumItem, storeSettingsId, cancellationToken);
 
                 _context.Products.Add(newProduct);
                 await _context.SaveChangesAsync(cancellationToken);
 
-                _logger.LogInformation("Created new product {ProductId} from ATUM data", newProduct.Id);
+                _logger.LogInformation("Created new product {ProductId} from ATUM data for store {StoreId}", newProduct.Id, storeSettingsId);
 
                 return new ProductMatchResult
                 {
@@ -406,10 +409,11 @@ public class ProductMatchingService
     /// <summary>
     /// Creates a new Product entity from ATUM data and fetches additional info from WooCommerce if needed
     /// </summary>
-    private async Task<Product> CreateProductFromAtumAsync(AtumInventoryItem atumItem, CancellationToken cancellationToken = default)
+    private async Task<Product> CreateProductFromAtumAsync(AtumInventoryItem atumItem, int storeSettingsId, CancellationToken cancellationToken = default)
     {
         var product = new Product
         {
+            StoreSettingsId = storeSettingsId,
             AtumId = atumItem.Id.ToString(),
             WooCommerceId = atumItem.ProductId.ToString(), // Store WooCommerce ID από ATUM
             SoftOneId = atumItem.GetSku(), // Χρησιμοποιούμε το SKU ως SoftOneId όταν δεν υπάρχει MTRL

@@ -303,17 +303,29 @@ public class FullSyncResponse
 }
 
 // API Models για Settings
+
+/// <summary>
+/// Global application settings (shared across all stores)
+/// </summary>
 public class ApiSettingsModel
 {
-    public string Name { get; set; } = "Κατάστημα Κέντρο";
-    public bool Enabled { get; set; } = true;
-    public SoftOneGoSettings SoftOneGo { get; set; } = new();
     public WooCommerceSettings WooCommerce { get; set; } = new();
-    public AtumSettings ATUM { get; set; } = new();
     public EmailSettings Email { get; set; } = new();
     public SyncSettings Sync { get; set; } = new();
     public MatchingSettings Matching { get; set; } = new();
     public FieldMappingSettings FieldMapping { get; set; } = new();
+}
+
+/// <summary>
+/// Store-specific settings (unique per store)
+/// </summary>
+public class StoreSettingsApiModel
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "Κατάστημα Κέντρο";
+    public bool Enabled { get; set; } = true;
+    public SoftOneGoSettings SoftOneGo { get; set; } = new();
+    public AtumSettings ATUM { get; set; } = new();
 }
 
 public class SoftOneGoSettings

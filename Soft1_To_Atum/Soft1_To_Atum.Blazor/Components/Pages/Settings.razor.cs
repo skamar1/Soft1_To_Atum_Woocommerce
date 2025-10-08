@@ -13,7 +13,11 @@ public partial class Settings : ComponentBase
     [Inject] private ILogger<Settings> Logger { get; set; } = default!;
     [Inject] private IJSRuntime JSRuntime { get; set; } = default!;
 
-    private ApiSettingsModel? settings;
+    private ApiSettingsModel? globalSettings;
+    private StoreSettingsApiModel? storeSettings;
+    private List<StoreResponse>? stores;
+    private int selectedStoreId = 1;
+
     private bool isSaving = false;
     private bool isTestingConnection = false;
     private bool isTestingEmail = false;
@@ -50,10 +54,35 @@ public partial class Settings : ComponentBase
                 Console.WriteLine("Loading settings...");
                 Logger.LogDebug("Loading settings (attempt {Attempt}/{MaxRetries})", retry + 1, maxRetries);
 
-                settings = await SyncApi.GetSettingsAsync();
-                if (settings == null)
+                // Load global settings
+                globalSettings = await SyncApi.GetSettingsAsync();
+                if (globalSettings == null)
                 {
-                    settings = new ApiSettingsModel();
+                    globalSettings = new ApiSettingsModel();
+                }
+
+                // Load stores
+                stores = await SyncApi.GetStoresAsync();
+                if (stores == null || stores.Count == 0)
+                {
+                    Logger.LogWarning("No stores found");
+                    Snackbar.Add("No stores configured. Please create a store first at Stores page.", Severity.Warning);
+                    stores = new List<StoreResponse>();
+                    // Create empty store settings to prevent UI errors
+                    storeSettings = new StoreSettingsApiModel
+                    {
+                        Id = 0,
+                        Name = "",
+                        Enabled = true,
+                        SoftOneGo = new SoftOneGoSettings(),
+                        ATUM = new AtumSettings()
+                    };
+                }
+                else
+                {
+                    // Set selected store to first store
+                    selectedStoreId = stores[0].Id;
+                    await LoadStoreSettings(selectedStoreId);
                 }
 
                 Logger.LogDebug("Settings loaded successfully");
@@ -78,41 +107,115 @@ public partial class Settings : ComponentBase
                 {
                     Snackbar.Add($"Error loading settings: {ex.Message}", Severity.Error);
                     Console.WriteLine($"Error loading settings: {ex.Message}");
-                    settings = new ApiSettingsModel();
+                    globalSettings = new ApiSettingsModel();
+                    stores = new List<StoreResponse>();
                 }
             }
         }
+    }
+
+    private async Task LoadStoreSettings(int storeId)
+    {
+        try
+        {
+            Logger.LogInformation("Loading store settings for store {StoreId}", storeId);
+            var response = await SyncApi.GetStoreByIdAsync(storeId);
+            if (response != null)
+            {
+                storeSettings = response;
+                Logger.LogInformation("Store settings loaded successfully for store {StoreId}", storeId);
+            }
+            else
+            {
+                Logger.LogWarning("Failed to load store settings for store {StoreId}", storeId);
+                storeSettings = new StoreSettingsApiModel();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading store settings for store {StoreId}: {Message}", storeId, ex.Message);
+            Snackbar.Add($"Error loading store settings: {ex.Message}", Severity.Error);
+            storeSettings = new StoreSettingsApiModel();
+        }
+    }
+
+    private async Task OnStoreChanged(int newStoreId)
+    {
+        selectedStoreId = newStoreId;
+        await LoadStoreSettings(selectedStoreId);
+        StateHasChanged();
     }
 
     private async Task SaveSettings()
     {
         Logger.LogInformation("=== SAVE SETTINGS BUTTON CLICKED ===");
 
-        if (settings == null)
+        if (globalSettings == null)
         {
-            Logger.LogWarning("SaveSettings called but settings is null");
-            Snackbar.Add("Settings not loaded. Please refresh the page.", Severity.Warning);
+            Logger.LogWarning("SaveSettings called but globalSettings is null");
+            Snackbar.Add("Global settings not loaded. Please refresh the page.", Severity.Warning);
             return;
         }
 
-        Logger.LogInformation("Starting to save settings for store: {StoreName}", settings.Name);
+        if (storeSettings == null)
+        {
+            Logger.LogWarning("SaveSettings called but storeSettings is null");
+            Snackbar.Add("Store settings not loaded. Please select a store.", Severity.Warning);
+            return;
+        }
+
+        Logger.LogInformation("Starting to save settings");
         isSaving = true;
         StateHasChanged(); // Force UI update
 
         try
         {
-            var success = await SyncApi.UpdateSettingsAsync(settings);
-            Logger.LogInformation("UpdateSettingsAsync returned: {Success}", success);
+            // Save global settings
+            var globalSuccess = await SyncApi.UpdateSettingsAsync(globalSettings);
+            Logger.LogInformation("UpdateSettingsAsync (global) returned: {Success}", globalSuccess);
 
-            if (success)
+            // Only save store settings if there are stores
+            bool storeSuccess = true; // Default to true if no stores exist
+            if (stores != null && stores.Count > 0)
             {
-                Snackbar.Add("Settings saved successfully!", Severity.Success);
-                Logger.LogInformation("Settings saved successfully");
+                // Save store settings
+                storeSuccess = await SyncApi.UpdateStoreAsync(selectedStoreId, storeSettings);
+                Logger.LogInformation("UpdateStoreAsync returned: {Success}", storeSuccess);
+
+                if (globalSuccess && storeSuccess)
+                {
+                    Snackbar.Add("Settings saved successfully!", Severity.Success);
+                    Logger.LogInformation("Settings saved successfully");
+                }
+                else if (!globalSuccess && !storeSuccess)
+                {
+                    Snackbar.Add("Failed to save both global and store settings", Severity.Error);
+                    Logger.LogWarning("Both updates failed");
+                }
+                else if (!globalSuccess)
+                {
+                    Snackbar.Add("Global settings failed to save, but store settings saved successfully", Severity.Warning);
+                    Logger.LogWarning("Global settings update failed");
+                }
+                else
+                {
+                    Snackbar.Add("Store settings failed to save, but global settings saved successfully", Severity.Warning);
+                    Logger.LogWarning("Store settings update failed");
+                }
             }
             else
             {
-                Snackbar.Add("Failed to save settings", Severity.Error);
-                Logger.LogWarning("UpdateSettingsAsync returned false");
+                // No stores, only global settings were saved
+                if (globalSuccess)
+                {
+                    Snackbar.Add("Global settings saved successfully!", Severity.Success);
+                    Logger.LogInformation("Global settings saved successfully (no stores configured)");
+                }
+                else
+                {
+                    Snackbar.Add("Failed to save global settings", Severity.Error);
+                    Logger.LogWarning("Global settings update failed");
+                }
             }
         }
         catch (Exception ex)
@@ -136,9 +239,9 @@ public partial class Settings : ComponentBase
         Logger.LogInformation("=== SETTINGS PAGE TEST CONNECTION START ===");
         Logger.LogInformation("User clicked Test Connection button for service: {Service}", service);
 
-        if (settings == null)
+        if (globalSettings == null || storeSettings == null)
         {
-            Logger.LogWarning("TestConnection called but settings is null");
+            Logger.LogWarning("TestConnection called but settings are null");
             Snackbar.Add("Settings not loaded. Please refresh the page.", Severity.Warning);
             return;
         }
@@ -223,16 +326,16 @@ public partial class Settings : ComponentBase
         Logger.LogInformation("=== TEST EMAIL START ===");
         Logger.LogInformation("User clicked Send Test Email button");
 
-        if (settings == null)
+        if (globalSettings == null)
         {
-            Logger.LogWarning("TestEmail called but settings is null");
+            Logger.LogWarning("TestEmail called but globalSettings is null");
             Snackbar.Add("Settings not loaded. Please refresh the page.", Severity.Warning);
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(settings.Email.SmtpHost) ||
-            string.IsNullOrWhiteSpace(settings.Email.FromEmail) ||
-            string.IsNullOrWhiteSpace(settings.Email.ToEmail))
+        if (string.IsNullOrWhiteSpace(globalSettings.Email.SmtpHost) ||
+            string.IsNullOrWhiteSpace(globalSettings.Email.FromEmail) ||
+            string.IsNullOrWhiteSpace(globalSettings.Email.ToEmail))
         {
             Snackbar.Add("Please fill in all email settings before testing", Severity.Warning);
             return;
@@ -283,9 +386,9 @@ public partial class Settings : ComponentBase
         Logger.LogInformation("=== EXPORT SETTINGS START ===");
         Logger.LogInformation("User clicked Export Settings button");
 
-        if (settings == null)
+        if (globalSettings == null || storeSettings == null)
         {
-            Logger.LogWarning("ExportSettings called but settings is null");
+            Logger.LogWarning("ExportSettings called but settings are null");
             Snackbar.Add("Settings not loaded. Please save settings first.", Severity.Warning);
             return;
         }

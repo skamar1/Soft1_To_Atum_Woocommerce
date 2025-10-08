@@ -2,31 +2,19 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Soft1_To_Atum.Data.Models;
 
+/// <summary>
+/// Global application settings shared across all stores
+/// </summary>
 public class AppSettings
 {
     [Key]
     public int Id { get; set; } = 1; // Single row table - always ID = 1
 
-    // Store Information
-    public string StoreName { get; set; } = "Κατάστημα Κέντρο";
-    public bool StoreEnabled { get; set; } = true;
-
-    // SoftOne Go Settings
-    public string SoftOneGoBaseUrl { get; set; } = "https://go.s1cloud.net/s1services";
-    public string SoftOneGoAppId { get; set; } = "703";
-    public string SoftOneGoToken { get; set; } = string.Empty;
-    public string SoftOneGoS1Code { get; set; } = string.Empty;
-    public string SoftOneGoFilters { get; set; } = "ITEM.MTRL_ITEMTRDATA_QTY1=1&ITEM.MTRL_ITEMTRDATA_QTY1_TO=9999";
-
-    // WooCommerce Settings
+    // WooCommerce Settings (shared across all stores)
     public string WooCommerceUrl { get; set; } = string.Empty;
     public string WooCommerceConsumerKey { get; set; } = string.Empty;
     public string WooCommerceConsumerSecret { get; set; } = string.Empty;
     public string WooCommerceVersion { get; set; } = "wc/v3";
-
-    // ATUM Settings
-    public int AtumLocationId { get; set; } = 870;
-    public string AtumLocationName { get; set; } = "store1_location";
 
     // Email Settings
     public string EmailSmtpHost { get; set; } = string.Empty;
@@ -62,25 +50,11 @@ public class AppSettings
 
     public void UpdateFromApiModel(ApiSettingsModel apiModel)
     {
-        StoreName = apiModel.Name;
-        StoreEnabled = apiModel.Enabled;
-
-        // SoftOne Go Settings
-        SoftOneGoBaseUrl = apiModel.SoftOneGo.BaseUrl;
-        SoftOneGoAppId = apiModel.SoftOneGo.AppId;
-        SoftOneGoToken = apiModel.SoftOneGo.Token;
-        SoftOneGoS1Code = apiModel.SoftOneGo.S1Code;
-        SoftOneGoFilters = apiModel.SoftOneGo.Filters;
-
         // WooCommerce Settings
         WooCommerceUrl = apiModel.WooCommerce.Url;
         WooCommerceConsumerKey = apiModel.WooCommerce.ConsumerKey;
         WooCommerceConsumerSecret = apiModel.WooCommerce.ConsumerSecret;
         WooCommerceVersion = apiModel.WooCommerce.Version;
-
-        // ATUM Settings
-        AtumLocationId = apiModel.ATUM.LocationId;
-        AtumLocationName = apiModel.ATUM.LocationName;
 
         // Email Settings
         EmailSmtpHost = apiModel.Email.SmtpHost;
@@ -117,27 +91,12 @@ public class AppSettings
     {
         return new ApiSettingsModel
         {
-            Name = StoreName,
-            Enabled = StoreEnabled,
-            SoftOneGo = new SoftOneGoSettings
-            {
-                BaseUrl = SoftOneGoBaseUrl,
-                AppId = SoftOneGoAppId,
-                Token = SoftOneGoToken,
-                S1Code = SoftOneGoS1Code,
-                Filters = SoftOneGoFilters
-            },
             WooCommerce = new WooCommerceSettings
             {
                 Url = WooCommerceUrl,
                 ConsumerKey = WooCommerceConsumerKey,
                 ConsumerSecret = WooCommerceConsumerSecret,
                 Version = WooCommerceVersion
-            },
-            ATUM = new AtumSettings
-            {
-                LocationId = AtumLocationId,
-                LocationName = AtumLocationName
             },
             Email = new EmailSettings
             {

@@ -9,7 +9,7 @@
     Configure synchronization settings and API credentials for SoftOne Go, WooCommerce and ATUM
 </MudText>
 
-@if (settings == null)
+@if (globalSettings == null || storeSettings == null)
 {
     <div class="d-flex justify-center align-center" style="height: 200px;">
         <MudProgressCircular Indeterminate="true" Size="Size.Large" Color="Color.Primary" />
@@ -19,6 +19,38 @@
 else
 {
     <MudGrid>
+        <!-- No Stores Warning -->
+        @if (stores != null && stores.Count == 0)
+        {
+            <MudItem xs="12">
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Class="mb-4">
+                    <MudText Typo="Typo.h6" Class="mb-2">No Stores Configured</MudText>
+                    <MudText Typo="Typo.body2">You need to create at least one store before you can configure store-specific settings.</MudText>
+                    <MudButton Href="/stores" Color="Color.Dark" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Store" Class="mt-2">
+                        Go to Stores Management
+                    </MudButton>
+                </MudAlert>
+            </MudItem>
+        }
+
+        <!-- Store Selection -->
+        @if (stores != null && stores.Count > 1)
+        {
+            <MudItem xs="12">
+                <MudPaper Class="pa-6 mb-4">
+                    <MudSelect T="int" Value="selectedStoreId"
+                             Label="Select Store"
+                             Variant="Variant.Outlined"
+                             ValueChanged="OnStoreChanged">
+                        @foreach (var store in stores)
+                        {
+                            <MudSelectItem T="int" Value="@store.Id">@store.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudPaper>
+            </MudItem>
+        }
+
         <!-- Store Information -->
         <MudItem xs="12">
             <MudPaper Class="pa-6 mb-4">
@@ -28,13 +60,13 @@ else
                 </MudText>
                 <MudGrid>
                     <MudItem xs="12" md="8">
-                        <MudTextField @bind-Value="settings.Name"
+                        <MudTextField @bind-Value="storeSettings.Name"
                                     Label="Store Name"
                                     Variant="Variant.Outlined"
                                     HelperText="Display name for this store" />
                     </MudItem>
                     <MudItem xs="12" md="4">
-                        <MudSwitch @bind-Value="settings.Enabled"
+                        <MudSwitch @bind-Value="storeSettings.Enabled"
                                  Label="Store Enabled"
                                  Color="Color.Primary" />
                     </MudItem>
@@ -51,32 +83,32 @@ else
                 </MudText>
                 <MudGrid>
                     <MudItem xs="12" md="6">
-                        <MudTextField @bind-Value="settings.SoftOneGo.BaseUrl"
+                        <MudTextField @bind-Value="storeSettings.SoftOneGo.BaseUrl"
                                     Label="Base URL"
                                     Variant="Variant.Outlined"
                                     HelperText="SoftOne Go API base URL" />
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <MudTextField @bind-Value="settings.SoftOneGo.AppId"
+                        <MudTextField @bind-Value="storeSettings.SoftOneGo.AppId"
                                     Label="App ID"
                                     Variant="Variant.Outlined"
                                     HelperText="Application ID in SoftOne Go" />
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <MudTextField @bind-Value="settings.SoftOneGo.S1Code"
+                        <MudTextField @bind-Value="storeSettings.SoftOneGo.S1Code"
                                     Label="S1 Code"
                                     Variant="Variant.Outlined"
                                     HelperText="Company code in SoftOne" />
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <MudTextField @bind-Value="settings.SoftOneGo.Token"
+                        <MudTextField @bind-Value="storeSettings.SoftOneGo.Token"
                                     Label="Token"
                                     InputType="InputType.Password"
                                     Variant="Variant.Outlined"
                                     HelperText="Authentication token" />
                     </MudItem>
                     <MudItem xs="12">
-                        <MudTextField @bind-Value="settings.SoftOneGo.Filters"
+                        <MudTextField @bind-Value="storeSettings.SoftOneGo.Filters"
                                     Label="Filters"
                                     Variant="Variant.Outlined"
                                     Lines="2"
@@ -112,26 +144,26 @@ else
                 </MudText>
                 <MudGrid>
                     <MudItem xs="12">
-                        <MudTextField @bind-Value="settings.WooCommerce.Url"
+                        <MudTextField @bind-Value="globalSettings.WooCommerce.Url"
                                     Label="Store URL"
                                     Placeholder="https://your-store.com"
                                     Variant="Variant.Outlined"
                                     HelperText="Your WooCommerce store URL" />
                     </MudItem>
                     <MudItem xs="12" md="4">
-                        <MudTextField @bind-Value="settings.WooCommerce.Version"
+                        <MudTextField @bind-Value="globalSettings.WooCommerce.Version"
                                     Label="API Version"
                                     Variant="Variant.Outlined"
                                     HelperText="WooCommerce API version" />
                     </MudItem>
                     <MudItem xs="12" md="4">
-                        <MudTextField @bind-Value="settings.WooCommerce.ConsumerKey"
+                        <MudTextField @bind-Value="globalSettings.WooCommerce.ConsumerKey"
                                     Label="Consumer Key"
                                     InputType="InputType.Password"
                                     Variant="Variant.Outlined" />
                     </MudItem>
                     <MudItem xs="12" md="4">
-                        <MudTextField @bind-Value="settings.WooCommerce.ConsumerSecret"
+                        <MudTextField @bind-Value="globalSettings.WooCommerce.ConsumerSecret"
                                     Label="Consumer Secret"
                                     InputType="InputType.Password"
                                     Variant="Variant.Outlined" />
@@ -166,13 +198,13 @@ else
                 </MudText>
                 <MudGrid>
                     <MudItem xs="12" md="6">
-                        <MudNumericField @bind-Value="settings.ATUM.LocationId"
+                        <MudNumericField @bind-Value="storeSettings.ATUM.LocationId"
                                        Label="Location ID"
                                        Variant="Variant.Outlined"
                                        HelperText="ATUM inventory location ID" />
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <MudTextField @bind-Value="settings.ATUM.LocationName"
+                        <MudTextField @bind-Value="storeSettings.ATUM.LocationName"
                                     Label="Location Name"
                                     Variant="Variant.Outlined"
                                     HelperText="ATUM location identifier" />
@@ -190,7 +222,7 @@ else
                 </MudText>
                 <MudGrid>
                     <MudItem xs="12" md="6">
-                        <MudSelect @bind-Value="settings.Matching.PrimaryField"
+                        <MudSelect @bind-Value="globalSettings.Matching.PrimaryField"
                                  Label="Primary Matching Field"
                                  Variant="Variant.Outlined"
                                  HelperText="Primary field to match products">
@@ -200,7 +232,7 @@ else
                         </MudSelect>
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <MudSelect @bind-Value="settings.Matching.SecondaryField"
+                        <MudSelect @bind-Value="globalSettings.Matching.SecondaryField"
                                  Label="Secondary Matching Field"
                                  Variant="Variant.Outlined"
                                  HelperText="Fallback field to match products">
@@ -210,13 +242,13 @@ else
                         </MudSelect>
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <MudSwitch @bind-Value="settings.Matching.CreateMissingProducts"
+                        <MudSwitch @bind-Value="globalSettings.Matching.CreateMissingProducts"
                                  Label="Create Missing Products"
                                  Color="Color.Primary" />
                         <MudText Typo="Typo.caption" Class="ml-4">Create products that don't exist in WooCommerce</MudText>
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <MudSwitch @bind-Value="settings.Matching.UpdateExistingProducts"
+                        <MudSwitch @bind-Value="globalSettings.Matching.UpdateExistingProducts"
                                  Label="Update Existing Products"
                                  Color="Color.Primary" />
                         <MudText Typo="Typo.caption" Class="ml-4">Update products that already exist in WooCommerce</MudText>
@@ -234,43 +266,43 @@ else
                 </MudText>
                 <MudGrid>
                     <MudItem xs="12" md="6">
-                        <MudTextField @bind-Value="settings.FieldMapping.Sku"
+                        <MudTextField @bind-Value="globalSettings.FieldMapping.Sku"
                                     Label="SKU Field"
                                     Variant="Variant.Outlined"
                                     HelperText="SoftOne field for product SKU" />
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <MudTextField @bind-Value="settings.FieldMapping.Name"
+                        <MudTextField @bind-Value="globalSettings.FieldMapping.Name"
                                     Label="Name Field"
                                     Variant="Variant.Outlined"
                                     HelperText="SoftOne field for product name" />
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <MudTextField @bind-Value="settings.FieldMapping.Price"
+                        <MudTextField @bind-Value="globalSettings.FieldMapping.Price"
                                     Label="Price Field"
                                     Variant="Variant.Outlined"
                                     HelperText="SoftOne field for product price" />
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <MudTextField @bind-Value="settings.FieldMapping.StockQuantity"
+                        <MudTextField @bind-Value="globalSettings.FieldMapping.StockQuantity"
                                     Label="Stock Quantity Field"
                                     Variant="Variant.Outlined"
                                     HelperText="SoftOne field for stock quantity" />
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <MudTextField @bind-Value="settings.FieldMapping.Category"
+                        <MudTextField @bind-Value="globalSettings.FieldMapping.Category"
                                     Label="Category Field"
                                     Variant="Variant.Outlined"
                                     HelperText="SoftOne field for product category" />
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <MudTextField @bind-Value="settings.FieldMapping.Unit"
+                        <MudTextField @bind-Value="globalSettings.FieldMapping.Unit"
                                     Label="Unit Field"
                                     Variant="Variant.Outlined"
                                     HelperText="SoftOne field for product unit" />
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <MudTextField @bind-Value="settings.FieldMapping.Vat"
+                        <MudTextField @bind-Value="globalSettings.FieldMapping.Vat"
                                     Label="VAT Field"
                                     Variant="Variant.Outlined"
                                     HelperText="SoftOne field for VAT rate" />
@@ -288,7 +320,7 @@ else
                 </MudText>
                 <MudGrid>
                     <MudItem xs="12" md="4">
-                        <MudNumericField @bind-Value="settings.Sync.IntervalMinutes"
+                        <MudNumericField @bind-Value="globalSettings.Sync.IntervalMinutes"
                                        Label="Sync Interval (minutes)"
                                        Variant="Variant.Outlined"
                                        Min="1"
@@ -296,12 +328,12 @@ else
                                        HelperText="How often to sync automatically" />
                     </MudItem>
                     <MudItem xs="12" md="4">
-                        <MudSwitch @bind-Value="settings.Sync.AutoSync"
+                        <MudSwitch @bind-Value="globalSettings.Sync.AutoSync"
                                  Label="Auto Sync Enabled"
                                  Color="Color.Primary" />
                     </MudItem>
                     <MudItem xs="12" md="4">
-                        <MudSwitch @bind-Value="settings.Sync.EmailNotifications"
+                        <MudSwitch @bind-Value="globalSettings.Sync.EmailNotifications"
                                  Label="Email Notifications"
                                  Color="Color.Primary" />
                     </MudItem>
@@ -318,36 +350,36 @@ else
                 </MudText>
                 <MudGrid>
                     <MudItem xs="12" md="6">
-                        <MudTextField @bind-Value="settings.Email.SmtpHost"
+                        <MudTextField @bind-Value="globalSettings.Email.SmtpHost"
                                     Label="SMTP Host"
                                     Placeholder="smtp.gmail.com"
                                     Variant="Variant.Outlined" />
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <MudNumericField @bind-Value="settings.Email.SmtpPort"
+                        <MudNumericField @bind-Value="globalSettings.Email.SmtpPort"
                                        Label="SMTP Port"
                                        Variant="Variant.Outlined"
                                        Min="1"
                                        Max="65535" />
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <MudTextField @bind-Value="settings.Email.Username"
+                        <MudTextField @bind-Value="globalSettings.Email.Username"
                                     Label="Username"
                                     Variant="Variant.Outlined" />
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <MudTextField @bind-Value="settings.Email.Password"
+                        <MudTextField @bind-Value="globalSettings.Email.Password"
                                     Label="Password"
                                     InputType="InputType.Password"
                                     Variant="Variant.Outlined" />
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <MudTextField @bind-Value="settings.Email.FromEmail"
+                        <MudTextField @bind-Value="globalSettings.Email.FromEmail"
                                     Label="From Email"
                                     Variant="Variant.Outlined" />
                     </MudItem>
                     <MudItem xs="12" md="6">
-                        <MudTextField @bind-Value="settings.Email.ToEmail"
+                        <MudTextField @bind-Value="globalSettings.Email.ToEmail"
                                     Label="To Email"
                                     Variant="Variant.Outlined" />
                     </MudItem>

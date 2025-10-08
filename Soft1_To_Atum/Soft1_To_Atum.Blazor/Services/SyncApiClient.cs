@@ -40,9 +40,27 @@ public class SyncApiClient
         });
     }
 
-    public async Task<ProductsPageResponse?> GetProductsAsync(int page = 1, int pageSize = 1000)
+    public async Task<List<AutoSyncLog>?> GetAutoSyncLogsAsync()
     {
-        var response = await _httpClient.GetAsync($"/api/products?page={page}&pageSize={pageSize}");
+        var response = await _httpClient.GetAsync("/api/sync/auto-sync-logs");
+        response.EnsureSuccessStatusCode();
+
+        var content = await response.Content.ReadAsStringAsync();
+        return JsonSerializer.Deserialize<List<AutoSyncLog>>(content, new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        });
+    }
+
+    public async Task<ProductsPageResponse?> GetProductsAsync(int page = 1, int pageSize = 1000, int? storeId = null)
+    {
+        var url = $"/api/products?page={page}&pageSize={pageSize}";
+        if (storeId.HasValue)
+        {
+            url += $"&storeId={storeId.Value}";
+        }
+
+        var response = await _httpClient.GetAsync(url);
         response.EnsureSuccessStatusCode();
 
         var content = await response.Content.ReadAsStringAsync();
@@ -52,20 +70,20 @@ public class SyncApiClient
         });
     }
 
-    public async Task<List<ProductResponse>?> GetAllProductsAsync()
+    public async Task<List<ProductResponse>?> GetAllProductsAsync(int? storeId = null)
     {
         var allProducts = new List<ProductResponse>();
         int page = 1;
         const int pageSize = 100;
         bool hasMoreData = true;
 
-        _logger.LogDebug("Loading all products from API with pagination");
+        _logger.LogDebug("Loading all products from API with pagination (storeId: {StoreId})", storeId);
 
         while (hasMoreData)
         {
             try
             {
-                var response = await GetProductsAsync(page, pageSize);
+                var response = await GetProductsAsync(page, pageSize, storeId);
                 if (response?.Products?.Any() == true)
                 {
                     allProducts.AddRange(response.Products);
@@ -84,7 +102,7 @@ public class SyncApiClient
             }
         }
 
-        _logger.LogDebug("Loaded {TotalProducts} products from API", allProducts.Count);
+        _logger.LogDebug("Loaded {TotalProducts} products from API for store {StoreId}", allProducts.Count, storeId);
         return allProducts;
     }
 
@@ -100,15 +118,143 @@ public class SyncApiClient
         });
     }
 
-    public async Task<ManualSyncResponse?> StartManualSyncAsync()
+    public async Task<StoreSettingsApiModel?> GetStoreByIdAsync(int storeId)
+    {
+        try
+        {
+            _logger.LogInformation("Getting store settings for store {StoreId}", storeId);
+            var response = await _httpClient.GetAsync($"/api/stores/{storeId}");
+
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                return JsonSerializer.Deserialize<StoreSettingsApiModel>(content, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+            }
+            else
+            {
+                _logger.LogError("Failed to get store {StoreId}: {StatusCode}", storeId, response.StatusCode);
+                return null;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting store {StoreId}", storeId);
+            return null;
+        }
+    }
+
+    public async Task<bool> UpdateStoreAsync(int storeId, StoreSettingsApiModel storeSettings)
+    {
+        try
+        {
+            _logger.LogInformation("Updating store {StoreId}", storeId);
+
+            var json = JsonSerializer.Serialize(storeSettings, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            });
+            _logger.LogDebug("Store settings JSON payload: {Json}", json);
+
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var response = await _httpClient.PutAsync($"/api/stores/{storeId}", content);
+
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation("Store {StoreId} updated successfully", storeId);
+                return true;
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                _logger.LogError("Failed to update store {StoreId}: {StatusCode} - {ErrorContent}", storeId, response.StatusCode, errorContent);
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating store {StoreId}", storeId);
+            return false;
+        }
+    }
+
+    public async Task<StoreSettingsApiModel?> CreateStoreAsync(StoreSettingsApiModel storeSettings)
+    {
+        try
+        {
+            _logger.LogInformation("Creating new store: {StoreName}", storeSettings.Name);
+
+            var json = JsonSerializer.Serialize(storeSettings, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            });
+            _logger.LogDebug("Store settings JSON payload: {Json}", json);
+
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var response = await _httpClient.PostAsync("/api/stores", content);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var responseContent = await response.Content.ReadAsStringAsync();
+                var createdStore = JsonSerializer.Deserialize<StoreSettingsApiModel>(responseContent, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+                _logger.LogInformation("Store created successfully with ID: {StoreId}", createdStore?.Id);
+                return createdStore;
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                _logger.LogError("Failed to create store: {StatusCode} - {ErrorContent}", response.StatusCode, errorContent);
+                return null;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating store");
+            return null;
+        }
+    }
+
+    public async Task<bool> DeleteStoreAsync(int storeId)
+    {
+        try
+        {
+            _logger.LogInformation("Deleting store {StoreId}", storeId);
+
+            var response = await _httpClient.DeleteAsync($"/api/stores/{storeId}");
+
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation("Store {StoreId} deleted successfully", storeId);
+                return true;
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                _logger.LogError("Failed to delete store {StoreId}: {StatusCode} - {ErrorContent}", storeId, response.StatusCode, errorContent);
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting store {StoreId}", storeId);
+            return false;
+        }
+    }
+
+    public async Task<ManualSyncResponse?> StartManualSyncAsync(int storeId)
     {
         try
         {
             _logger.LogInformation("=== SOFTONE TO DATABASE SYNC CLIENT REQUEST START ===");
             _logger.LogInformation("HTTP Client BaseAddress: {BaseAddress}", _httpClient.BaseAddress);
-            _logger.LogInformation("Starting SoftOne to Database sync API call to /api/sync/softone-to-database");
+            _logger.LogInformation("Starting SoftOne to Database sync API call for store {StoreId} to /api/sync/softone-to-database", storeId);
 
-            var response = await _httpClient.PostAsync("/api/sync/softone-to-database", null);
+            var response = await _httpClient.PostAsync($"/api/sync/softone-to-database?storeId={storeId}", null);
             _logger.LogInformation("SoftOne to Database sync API response status: {StatusCode}", response.StatusCode);
 
             if (response.IsSuccessStatusCode)
@@ -149,15 +295,15 @@ public class SyncApiClient
         }
     }
 
-    public async Task<ManualSyncResponse?> StartAtumSyncAsync()
+    public async Task<ManualSyncResponse?> StartAtumSyncAsync(int storeId)
     {
         try
         {
             _logger.LogInformation("=== ATUM SYNC CLIENT REQUEST START ===");
             _logger.LogInformation("HTTP Client BaseAddress: {BaseAddress}", _httpClient.BaseAddress);
-            _logger.LogInformation("Starting ATUM sync API call to /api/sync/atum");
+            _logger.LogInformation("Starting ATUM sync API call for store {StoreId} to /api/sync/atum", storeId);
 
-            var response = await _httpClient.PostAsync("/api/sync/atum", null);
+            var response = await _httpClient.PostAsync($"/api/sync/atum?storeId={storeId}", null);
             _logger.LogInformation("ATUM sync API response status: {StatusCode}", response.StatusCode);
 
             if (response.IsSuccessStatusCode)

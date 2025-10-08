@@ -12,6 +12,10 @@ public partial class Products : ComponentBase
     [Inject] private ILogger<Products> Logger { get; set; } = null!;
     [Inject] private IDialogService DialogService { get; set; } = null!;
 
+    private List<StoreResponse> stores = new();
+    private int? selectedStoreId = null;
+    private bool isLoadingStores = false;
+
     private List<ProductResponse> products = new();
     private List<ProductResponse> filteredProducts = new();
     private bool loading = true;
@@ -34,7 +38,35 @@ public partial class Products : ComponentBase
 
     protected override async Task OnInitializedAsync()
     {
-        await LoadProducts();
+        await LoadStores();
+        // Don't load products automatically - wait for user to select store and click Refresh
+    }
+
+    private async Task LoadStores()
+    {
+        isLoadingStores = true;
+        try
+        {
+            var storeResponses = await SyncApi.GetStoresAsync();
+            if (storeResponses != null)
+            {
+                stores = storeResponses.ToList();
+                // Select first store by default
+                if (stores.Count > 0)
+                {
+                    selectedStoreId = stores.First().Id;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading stores");
+            Snackbar.Add($"Error loading stores: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            isLoadingStores = false;
+        }
     }
 
     private async Task LoadProducts()
@@ -42,20 +74,20 @@ public partial class Products : ComponentBase
         try
         {
             loading = true;
-            Logger.LogDebug("Loading all products from API");
+            Logger.LogDebug("Loading products from API for store {StoreId}", selectedStoreId);
 
-            // Call the GetAllProductsAsync method to get all products
-            var allProducts = await SyncApi.GetAllProductsAsync();
+            // Call the GetAllProductsAsync method to get all products for the selected store
+            var allProducts = await SyncApi.GetAllProductsAsync(selectedStoreId);
             if (allProducts != null)
             {
                 products = allProducts;
                 FilterProducts();
-                Logger.LogDebug("Loaded {ProductCount} products", products.Count);
+                Logger.LogDebug("Loaded {ProductCount} products for store {StoreId}", products.Count, selectedStoreId);
                 Snackbar.Add($"Loaded {products.Count} products", Severity.Success);
             }
             else
             {
-                Logger.LogWarning("No products returned from API");
+                Logger.LogWarning("No products returned from API for store {StoreId}", selectedStoreId);
                 Snackbar.Add("No products found", Severity.Warning);
                 products = new List<ProductResponse>();
             }
@@ -81,7 +113,13 @@ public partial class Products : ComponentBase
 
     private async Task RefreshProducts()
     {
-        Logger.LogInformation("User requested products refresh");
+        if (selectedStoreId == null)
+        {
+            Snackbar.Add("Please select a store first", Severity.Warning);
+            return;
+        }
+
+        Logger.LogInformation("User requested products refresh for store {StoreId}", selectedStoreId);
         await LoadProducts();
     }
 

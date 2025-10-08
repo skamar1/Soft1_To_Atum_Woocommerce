@@ -11,6 +11,10 @@ public partial class Home : ComponentBase, IDisposable
     [Inject] private ISnackbar Snackbar { get; set; } = null!;
     [Inject] private ILogger<Home> Logger { get; set; } = null!;
 
+    private List<StoreResponse> stores = new();
+    private int? selectedStoreId = null;
+    private bool isLoadingStores = false;
+
     private bool isSyncRunning = false;
     private bool isWooCommerceSyncRunning = false;
     private string? currentWooCommerceJobId = null;
@@ -21,6 +25,7 @@ public partial class Home : ComponentBase, IDisposable
     private Severity lastSyncSeverity = Severity.Info;
     private SyncLogResponse? lastSyncLog;
     private ProductStatisticsResponse? productStatistics;
+    private AutoSyncLog? lastAutoSyncLog;
 
     // WooCommerce page-by-page sync tracking
     private int currentPage = 0;
@@ -40,14 +45,48 @@ public partial class Home : ComponentBase, IDisposable
 
     protected override async Task OnInitializedAsync()
     {
+        await LoadStores();
         await RefreshDashboard();
+    }
+
+    private async Task LoadStores()
+    {
+        isLoadingStores = true;
+        try
+        {
+            var storeResponses = await SyncApi.GetStoresAsync();
+            if (storeResponses != null)
+            {
+                stores = storeResponses.ToList();
+                // Select first store by default
+                if (stores.Count > 0)
+                {
+                    selectedStoreId = stores.First().Id;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading stores");
+            Snackbar.Add($"Error loading stores: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            isLoadingStores = false;
+        }
     }
 
     private async Task StartManualSync()
     {
         if (isSyncRunning) return;
 
-        Logger.LogInformation("User initiated manual sync from dashboard");
+        if (!selectedStoreId.HasValue)
+        {
+            Snackbar.Add("Please select a store first", Severity.Warning);
+            return;
+        }
+
+        Logger.LogInformation("User initiated manual sync from dashboard for store {StoreId}", selectedStoreId.Value);
         isSyncRunning = true;
         lastSyncMessage = "Starting synchronization...";
         lastSyncSeverity = Severity.Info;
@@ -55,7 +94,7 @@ public partial class Home : ComponentBase, IDisposable
 
         try
         {
-            var result = await SyncApi.StartManualSyncAsync();
+            var result = await SyncApi.StartManualSyncAsync(selectedStoreId.Value);
 
             if (result != null)
             {
@@ -303,7 +342,13 @@ public partial class Home : ComponentBase, IDisposable
     {
         if (isAtumSyncRunning) return;
 
-        Logger.LogInformation("User initiated ATUM sync from dashboard");
+        if (!selectedStoreId.HasValue)
+        {
+            Snackbar.Add("Please select a store first", Severity.Warning);
+            return;
+        }
+
+        Logger.LogInformation("User initiated ATUM sync from dashboard for store {StoreId}", selectedStoreId.Value);
         isAtumSyncRunning = true;
         lastSyncMessage = "Starting ATUM synchronization...";
         lastSyncSeverity = Severity.Info;
@@ -311,7 +356,7 @@ public partial class Home : ComponentBase, IDisposable
 
         try
         {
-            var result = await SyncApi.StartAtumSyncAsync();
+            var result = await SyncApi.StartAtumSyncAsync(selectedStoreId.Value);
 
             if (result != null)
             {
@@ -437,14 +482,16 @@ public partial class Home : ComponentBase, IDisposable
         {
             Logger.LogDebug("Refreshing dashboard data");
 
-            // Load the most recent sync log and product statistics in parallel
+            // Load sync logs, product statistics, and auto-sync logs in parallel
             var syncLogsTask = SyncApi.GetSyncLogsAsync();
             var statisticsTask = SyncApi.GetProductStatisticsAsync();
+            var autoSyncLogsTask = SyncApi.GetAutoSyncLogsAsync();
 
-            await Task.WhenAll(syncLogsTask, statisticsTask);
+            await Task.WhenAll(syncLogsTask, statisticsTask, autoSyncLogsTask);
 
             var syncLogs = await syncLogsTask;
             productStatistics = await statisticsTask;
+            var autoSyncLogs = await autoSyncLogsTask;
 
             if (syncLogs?.Any() == true)
             {
@@ -455,6 +502,17 @@ public partial class Home : ComponentBase, IDisposable
             {
                 lastSyncLog = null;
                 Logger.LogDebug("No sync logs found");
+            }
+
+            if (autoSyncLogs?.Any() == true)
+            {
+                lastAutoSyncLog = autoSyncLogs.OrderByDescending(s => s.StartedAt).First();
+                Logger.LogDebug("Loaded last auto-sync log: {AutoSyncLogId} - {Status}", lastAutoSyncLog.Id, lastAutoSyncLog.Status);
+            }
+            else
+            {
+                lastAutoSyncLog = null;
+                Logger.LogDebug("No auto-sync logs found");
             }
 
             if (productStatistics != null)
@@ -559,9 +617,102 @@ public partial class Home : ComponentBase, IDisposable
         return "-";
     }
 
+    private static Color GetAutoSyncStatusColor(string status)
+    {
+        return status.ToLower() switch
+        {
+            "completed" => Color.Success,
+            "running" => Color.Info,
+            "failed" => Color.Error,
+            "cancelled" => Color.Warning,
+            _ => Color.Default
+        };
+    }
+
+    private static string GetAutoSyncStatusText(string status)
+    {
+        return status.ToLower() switch
+        {
+            "completed" => "Ολοκληρώθηκε",
+            "running" => "Εκτελείται",
+            "failed" => "Αποτυχία",
+            "cancelled" => "Ακυρώθηκε",
+            _ => status
+        };
+    }
+
+    private static string GetAutoSyncDuration(AutoSyncLog log)
+    {
+        if (log.CompletedAt.HasValue)
+        {
+            var duration = log.CompletedAt.Value - log.StartedAt;
+            if (duration.TotalHours >= 1)
+                return $"{(int)duration.TotalHours}ώ {duration.Minutes}λ";
+            else if (duration.TotalMinutes >= 1)
+                return $"{(int)duration.TotalMinutes}λ {duration.Seconds}δ";
+            else
+                return $"{duration.Seconds}δ";
+        }
+        return "Εκτελείται...";
+    }
+
+    private static Color GetSyncStepColor(string status)
+    {
+        return status.ToLower() switch
+        {
+            "success" => Color.Success,
+            "failed" => Color.Error,
+            "partial" => Color.Warning,
+            _ => Color.Default
+        };
+    }
+
+    private List<StoreDetailViewModel> GetStoreDetails(string detailsJson)
+    {
+        if (string.IsNullOrEmpty(detailsJson))
+            return new List<StoreDetailViewModel>();
+
+        try
+        {
+            var dict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.JsonElement>>(detailsJson);
+            if (dict == null) return new List<StoreDetailViewModel>();
+
+            var results = new List<StoreDetailViewModel>();
+            foreach (var kvp in dict)
+            {
+                var detail = kvp.Value;
+                results.Add(new StoreDetailViewModel
+                {
+                    StoreName = detail.TryGetProperty("storeName", out var storeName) ? storeName.GetString() ?? "" : "",
+                    StoreId = detail.TryGetProperty("storeId", out var storeId) ? storeId.GetInt32() : 0,
+                    SoftOneSync = detail.TryGetProperty("softOneSync", out var softOne) ? softOne.GetString() ?? "" : "",
+                    AtumSync = detail.TryGetProperty("atumSync", out var atum) ? atum.GetString() ?? "" : "",
+                    FullSync = detail.TryGetProperty("fullSync", out var full) ? full.GetString() ?? "" : "",
+                    Status = detail.TryGetProperty("status", out var status) ? status.GetString() ?? "" : ""
+                });
+            }
+            return results;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error parsing store details from JSON");
+            return new List<StoreDetailViewModel>();
+        }
+    }
+
     public void Dispose()
     {
         wooCommerceProgressTimer?.Dispose();
         wooCommerceProgressTimer = null;
+    }
+
+    private class StoreDetailViewModel
+    {
+        public string StoreName { get; set; } = "";
+        public int StoreId { get; set; }
+        public string SoftOneSync { get; set; } = "";
+        public string AtumSync { get; set; } = "";
+        public string FullSync { get; set; } = "";
+        public string Status { get; set; } = "";
     }
 }

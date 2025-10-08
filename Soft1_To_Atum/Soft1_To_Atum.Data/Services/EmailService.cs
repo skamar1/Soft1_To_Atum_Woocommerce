@@ -54,7 +54,7 @@ public class EmailService
         }
     }
 
-    public async Task SendSyncNotificationAsync(SyncLog syncLog, AppSettings settings, CancellationToken cancellationToken = default)
+    public async Task SendSyncNotificationAsync(SyncLog syncLog, AppSettings settings, StoreSettings? storeSettings = null, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -68,11 +68,12 @@ public class EmailService
 
             using var client = CreateSmtpClient(settings);
 
+            var storeName = storeSettings?.StoreName ?? "All Stores";
             var subject = syncLog.Status == "Completed"
-                ? $"✅ Sync Completed - {settings.StoreName}"
-                : $"❌ Sync Failed - {settings.StoreName}";
+                ? $"✅ Sync Completed - {storeName}"
+                : $"❌ Sync Failed - {storeName}";
 
-            var body = BuildSyncNotificationBody(syncLog, settings);
+            var body = BuildSyncNotificationBody(syncLog, settings, storeSettings);
 
             var message = new MailMessage
             {
@@ -141,7 +142,7 @@ public class EmailService
         return client;
     }
 
-    private string BuildSyncNotificationBody(SyncLog syncLog, AppSettings settings)
+    private string BuildSyncNotificationBody(SyncLog syncLog, AppSettings settings, StoreSettings? storeSettings = null)
     {
         var sb = new StringBuilder();
 
@@ -165,7 +166,8 @@ public class EmailService
 
         // Header
         sb.AppendLine("<div class='header'>");
-        sb.AppendLine($"<h2>Sync Report - {settings.StoreName}</h2>");
+        var storeName = storeSettings?.StoreName ?? "All Stores";
+        sb.AppendLine($"<h2>Sync Report - {storeName}</h2>");
         sb.AppendLine($"<p><strong>Started:</strong> {syncLog.StartedAt:yyyy-MM-dd HH:mm:ss}</p>");
         sb.AppendLine($"<p><strong>Completed:</strong> {syncLog.CompletedAt?.ToString("yyyy-MM-dd HH:mm:ss") ?? "N/A"}</p>");
         sb.AppendLine($"<p><strong>Duration:</strong> {syncLog.Duration?.ToString(@"hh\:mm\:ss") ?? "N/A"}</p>");
@@ -223,10 +225,14 @@ public class EmailService
         // Configuration info
         sb.AppendLine("<div style='margin-top: 20px; font-size: 12px; color: #6c757d;'>");
         sb.AppendLine("<h4>Configuration</h4>");
-        sb.AppendLine($"<p><strong>SoftOne URL:</strong> {settings.SoftOneGoBaseUrl}</p>");
+        if (storeSettings != null)
+        {
+            sb.AppendLine($"<p><strong>Store:</strong> {storeSettings.StoreName}</p>");
+            sb.AppendLine($"<p><strong>SoftOne URL:</strong> {storeSettings.SoftOneGoBaseUrl}</p>");
+            sb.AppendLine($"<p><strong>ATUM Location:</strong> {storeSettings.AtumLocationName} (ID: {storeSettings.AtumLocationId})</p>");
+            sb.AppendLine($"<p><strong>Filters:</strong> {storeSettings.SoftOneGoFilters}</p>");
+        }
         sb.AppendLine($"<p><strong>WooCommerce URL:</strong> {settings.WooCommerceUrl}</p>");
-        sb.AppendLine($"<p><strong>ATUM Location:</strong> {settings.AtumLocationName} (ID: {settings.AtumLocationId})</p>");
-        sb.AppendLine($"<p><strong>Filters:</strong> {settings.SoftOneGoFilters}</p>");
         sb.AppendLine("</div>");
 
         sb.AppendLine("<div style='margin-top: 20px; padding: 10px; background-color: #f8f9fa; border-radius: 5px; font-size: 12px;'>");

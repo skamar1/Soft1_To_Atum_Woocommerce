@@ -26,83 +26,88 @@
                 </MudCardHeader>
                 <MudCardContent>
                     <MudText Typo="Typo.body2" GutterBottom="true">
-                        Manually trigger synchronization between SoftOne Go and WooCommerce ATUM
+                        Select a store and manually trigger synchronization
                     </MudText>
 
+                    @if (stores.Count == 0)
+                    {
+                        <MudAlert Severity="Severity.Warning" Class="mt-3 mb-3">
+                            No stores configured. Please <MudLink Href="/stores">create a store</MudLink> first.
+                        </MudAlert>
+                    }
+                    else
+                    {
+                        <MudGrid Class="mt-3 mb-4">
+                            <MudItem xs="12">
+                                <MudSelect T="int?" @bind-Value="selectedStoreId"
+                                          Label="Select Store"
+                                          Variant="Variant.Outlined"
+                                          AnchorOrigin="Origin.BottomCenter"
+                                          Disabled="@isLoadingStores">
+                                    @foreach (var store in stores)
+                                    {
+                                        <MudSelectItem T="int?" Value="@((int?)store.Id)">@store.Name</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+                        </MudGrid>
+                    }
+
                     <MudGrid Class="mt-3">
-                        <MudItem xs="12" sm="6" md="3">
+                        <MudItem xs="12" sm="4">
                             <MudButton Variant="Variant.Filled"
                                       Color="Color.Primary"
                                       Size="Size.Large"
                                       StartIcon="@Icons.Material.Filled.PlayArrow"
                                       OnClick="@StartManualSync"
-                                      Disabled="@isSyncRunning"
+                                      Disabled="@(isSyncRunning || selectedStoreId == null)"
                                       FullWidth="true">
                                 @if (isSyncRunning)
-                                {
-                                    <MudProgressCircular Class="ms-n1" Size="Size.Small" Indeterminate="true" />
-                                    <MudText Class="ms-2" Style="color: white;">Running SoftOne Sync...</MudText>
-                                }
-                                else
-                                {
-                                    <MudText Style="color: white;">SoftOne</MudText>
-                                }
-                            </MudButton>
-                        </MudItem>
-                        <MudItem xs="12" sm="6" md="3">
-                            <MudButton Variant="Variant.Filled"
-                                      Color="Color.Success"
-                                      Size="Size.Large"
-                                      StartIcon="@Icons.Material.Filled.Storefront"
-                                      OnClick="@StartWooCommerceSync"
-                                      Disabled="@isWooCommerceSyncRunning"
-                                      FullWidth="true">
-                                @if (isWooCommerceSyncRunning)
                                 {
                                     <MudProgressCircular Class="ms-n1" Size="Size.Small" Indeterminate="true" />
                                     <MudText Class="ms-2" Style="color: white;">Running...</MudText>
                                 }
                                 else
                                 {
-                                    <MudText Style="color: white;">panes.gr</MudText>
+                                    <MudText Style="color: white;">Sync SoftOne</MudText>
                                 }
                             </MudButton>
                         </MudItem>
-                        <MudItem xs="12" sm="6" md="3">
+                        <MudItem xs="12" sm="4">
                             <MudButton Variant="Variant.Filled"
                                       Color="Color.Info"
                                       Size="Size.Large"
                                       StartIcon="@Icons.Material.Filled.Inventory"
                                       OnClick="@StartAtumSync"
-                                      Disabled="@isAtumSyncRunning"
+                                      Disabled="@(isAtumSyncRunning || selectedStoreId == null)"
                                       FullWidth="true">
                                 @if (isAtumSyncRunning)
                                 {
                                     <MudProgressCircular Class="ms-n1" Size="Size.Small" Indeterminate="true" />
-                                    <MudText Class="ms-2">Running ATUM Sync...</MudText>
+                                    <MudText Class="ms-2">Running...</MudText>
                                 }
                                 else
                                 {
-                                    <MudText Style="color: white;">ATUM</MudText>
+                                    <MudText Style="color: white;">Sync ATUM</MudText>
                                 }
                             </MudButton>
                         </MudItem>
-                        <MudItem xs="12" sm="6" md="3">
+                        <MudItem xs="12" sm="4">
                             <MudButton Variant="Variant.Filled"
                                       Color="Color.Secondary"
                                       Size="Size.Large"
                                       StartIcon="@Icons.Material.Filled.BatchPrediction"
                                       OnClick="@StartAtumBatchSync"
-                                      Disabled="@isAtumBatchSyncRunning"
+                                      Disabled="@(isAtumBatchSyncRunning || selectedStoreId == null)"
                                       FullWidth="true">
                                 @if (isAtumBatchSyncRunning)
                                 {
                                     <MudProgressCircular Class="ms-n1" Size="Size.Small" Indeterminate="true" />
-                                    <MudText Class="ms-2">Running ATUM Batch...</MudText>
+                                    <MudText Class="ms-2">Running...</MudText>
                                 }
                                 else
                                 {
-                                    <MudText Style="color: white;">Sync</MudText>
+                                    <MudText Style="color: white;">Full Sync</MudText>
                                 }
                             </MudButton>
                         </MudItem>
@@ -193,6 +198,86 @@
                     else
                     {
                         <MudText Typo="Typo.body2" Color="Color.Secondary">No sync history available</MudText>
+                    }
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+
+        <!-- Auto-Sync Status Card -->
+        <MudItem xs="12">
+            <MudCard>
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">
+                            <MudIcon Icon="Icons.Material.Filled.Schedule" Class="mr-2" />
+                            Αυτόματος Συγχρονισμός (Auto-Sync)
+                        </MudText>
+                    </CardHeaderContent>
+                </MudCardHeader>
+                <MudCardContent>
+                    @if (lastAutoSyncLog != null)
+                    {
+                        <MudGrid>
+                            <MudItem xs="12" sm="6" md="3">
+                                <MudText Typo="Typo.body2" Color="Color.Secondary">Τελευταίος Συγχρονισμός:</MudText>
+                                <MudText Typo="Typo.body1">@lastAutoSyncLog.StartedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</MudText>
+                            </MudItem>
+                            <MudItem xs="12" sm="6" md="3">
+                                <MudText Typo="Typo.body2" Color="Color.Secondary">Κατάσταση:</MudText>
+                                <MudChip T="string" Color="@GetAutoSyncStatusColor(lastAutoSyncLog.Status)" Size="Size.Small">
+                                    @GetAutoSyncStatusText(lastAutoSyncLog.Status)
+                                </MudChip>
+                            </MudItem>
+                            <MudItem xs="12" sm="6" md="3">
+                                <MudText Typo="Typo.body2" Color="Color.Secondary">Καταστήματα:</MudText>
+                                <MudText Typo="Typo.body1">
+                                    <span style="color: var(--mud-palette-success);">@lastAutoSyncLog.SuccessfulStores επιτυχή</span>
+                                    @if (lastAutoSyncLog.FailedStores > 0)
+                                    {
+                                        <span> / <span style="color: var(--mud-palette-error);">@lastAutoSyncLog.FailedStores αποτυχία</span></span>
+                                    }
+                                </MudText>
+                            </MudItem>
+                            <MudItem xs="12" sm="6" md="3">
+                                <MudText Typo="Typo.body2" Color="Color.Secondary">Διάρκεια:</MudText>
+                                <MudText Typo="Typo.body1">@GetAutoSyncDuration(lastAutoSyncLog)</MudText>
+                            </MudItem>
+                        </MudGrid>
+
+                        @if (!string.IsNullOrEmpty(lastAutoSyncLog.Details))
+                        {
+                            <MudExpansionPanels Class="mt-3">
+                                <MudExpansionPanel Text="Λεπτομέρειες ανά Κατάστημα">
+                                    <MudSimpleTable Dense="true" Hover="true" Style="overflow-x: auto;">
+                                        <thead>
+                                            <tr>
+                                                <th>Κατάστημα</th>
+                                                <th>SoftOne</th>
+                                                <th>ATUM</th>
+                                                <th>Full Sync</th>
+                                                <th>Κατάσταση</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var storeDetail in GetStoreDetails(lastAutoSyncLog.Details))
+                                            {
+                                                <tr>
+                                                    <td>@storeDetail.StoreName</td>
+                                                    <td><MudChip T="string" Size="Size.Small" Color="@GetSyncStepColor(storeDetail.SoftOneSync)">@storeDetail.SoftOneSync</MudChip></td>
+                                                    <td><MudChip T="string" Size="Size.Small" Color="@GetSyncStepColor(storeDetail.AtumSync)">@storeDetail.AtumSync</MudChip></td>
+                                                    <td><MudChip T="string" Size="Size.Small" Color="@GetSyncStepColor(storeDetail.FullSync)">@storeDetail.FullSync</MudChip></td>
+                                                    <td><MudChip T="string" Size="Size.Small" Color="@GetSyncStepColor(storeDetail.Status)">@storeDetail.Status</MudChip></td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </MudSimpleTable>
+                                </MudExpansionPanel>
+                            </MudExpansionPanels>
+                        }
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">Δεν υπάρχει ιστορικό αυτόματου συγχρονισμού</MudText>
                     }
                 </MudCardContent>
             </MudCard>
@@ -358,34 +443,25 @@
                 </MudCardHeader>
                 <MudCardContent>
                     <MudGrid>
-                        <MudItem xs="12" sm="6" md="3">
+                        <MudItem xs="12" sm="6" md="4">
                             <MudButton Variant="Variant.Outlined"
                                       Color="Color.Primary"
-                                      StartIcon="@Icons.Material.Filled.Settings"
-                                      Href="/settings"
+                                      StartIcon="@Icons.Material.Filled.Store"
+                                      Href="/stores"
                                       FullWidth="true">
-                                Configure Settings
+                                Manage Stores
                             </MudButton>
                         </MudItem>
-                        <MudItem xs="12" sm="6" md="3">
+                        <MudItem xs="12" sm="6" md="4">
                             <MudButton Variant="Variant.Outlined"
                                       Color="Color.Secondary"
-                                      StartIcon="@Icons.Material.Filled.History"
-                                      OnClick="@LoadSyncHistory"
+                                      StartIcon="@Icons.Material.Filled.Settings"
+                                      Href="/global-settings"
                                       FullWidth="true">
-                                View Sync History
+                                Global Settings
                             </MudButton>
                         </MudItem>
-                        <MudItem xs="12" sm="6" md="3">
-                            <MudButton Variant="Variant.Outlined"
-                                      Color="Color.Info"
-                                      StartIcon="@Icons.Material.Filled.CheckCircle"
-                                      OnClick="@TestConnections"
-                                      FullWidth="true">
-                                Test Connections
-                            </MudButton>
-                        </MudItem>
-                        <MudItem xs="12" sm="6" md="3">
+                        <MudItem xs="12" sm="6" md="4">
                             <MudButton Variant="Variant.Outlined"
                                       Color="Color.Tertiary"
                                       StartIcon="@Icons.Material.Filled.Refresh"

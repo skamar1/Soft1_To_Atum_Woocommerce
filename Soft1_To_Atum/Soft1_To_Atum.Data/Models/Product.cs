@@ -4,6 +4,10 @@ public class Product
 {
     public int Id { get; set; }
 
+    // Store Association
+    public int StoreSettingsId { get; set; }
+    public virtual StoreSettings? StoreSettings { get; set; }
+
     // External System IDs
     public string SoftOneId { get; set; } = string.Empty; // ITEM.CODE (legacy)
     public string WooCommerceId { get; set; } = string.Empty;

@@ -1,0 +1,201 @@
+@page "/stores"
+@rendermode InteractiveServer
+@using Soft1_To_Atum.Data.Models
+
+<PageTitle>Stores Management - SoftOne to ATUM Sync</PageTitle>
+
+<MudText Typo="Typo.h3" Class="mb-4">Stores Management</MudText>
+<MudText Typo="Typo.body1" Class="mb-6" Color="Color.Secondary">
+    Manage your stores and their individual SoftOne Go and ATUM Multi Inventory settings
+</MudText>
+
+@if (isLoading)
+{
+    <div class="d-flex justify-center align-center" style="height: 200px;">
+        <MudProgressCircular Indeterminate="true" Size="Size.Large" Color="Color.Primary" />
+        <MudText Typo="Typo.h6" Class="ml-4">Loading stores...</MudText>
+    </div>
+}
+else
+{
+    <MudPaper Class="pa-4 mb-4">
+        <MudButton StartIcon="@Icons.Material.Filled.Add"
+                   Color="Color.Primary"
+                   Variant="Variant.Filled"
+                   OnClick="OpenCreateDialog">
+            Create New Store
+        </MudButton>
+    </MudPaper>
+
+    <MudTable Items="@stores" Hover="true" Breakpoint="Breakpoint.Sm" Loading="@isLoading" LoadingProgressColor="Color.Info">
+        <HeaderContent>
+            <MudTh>ID</MudTh>
+            <MudTh>Store Name</MudTh>
+            <MudTh>Status</MudTh>
+            <MudTh>SoftOne Go App ID</MudTh>
+            <MudTh>ATUM Location</MudTh>
+            <MudTh>Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="ID">@context.Id</MudTd>
+            <MudTd DataLabel="Name">@context.Name</MudTd>
+            <MudTd DataLabel="Status">
+                <MudChip T="string" Color="@(context.Enabled ? Color.Success : Color.Default)" Size="Size.Small">
+                    @(context.Enabled ? "Enabled" : "Disabled")
+                </MudChip>
+            </MudTd>
+            <MudTd DataLabel="SoftOne Go">@context.SoftOneGo.AppId</MudTd>
+            <MudTd DataLabel="ATUM">@context.ATUM.LocationName (@context.ATUM.LocationId)</MudTd>
+            <MudTd DataLabel="Actions">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                               Color="Color.Primary"
+                               Size="Size.Small"
+                               OnClick="@(() => OpenEditDialog(context))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                               Color="Color.Error"
+                               Size="Size.Small"
+                               OnClick="@(() => OpenDeleteDialog(context))" />
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Typo="Typo.body1" Color="Color.Secondary" Class="pa-4">
+                No stores found. Create your first store to get started!
+            </MudText>
+        </NoRecordsContent>
+    </MudTable>
+}
+
+<!-- Create/Edit Dialog -->
+<MudDialog @bind-Visible="isDialogOpen" Options="dialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.Store" Class="mr-2" />
+            @(isEditMode ? "Edit Store" : "Create New Store")
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (currentStore != null)
+        {
+            <MudGrid>
+                <!-- Store Information -->
+                <MudItem xs="12">
+                    <MudText Typo="Typo.h6" Class="mb-3">Store Information</MudText>
+                </MudItem>
+                <MudItem xs="12" md="8">
+                    <MudTextField @bind-Value="currentStore.Name"
+                                  Label="Store Name"
+                                  Variant="Variant.Outlined"
+                                  Required="true"
+                                  HelperText="Display name for this store" />
+                </MudItem>
+                <MudItem xs="12" md="4">
+                    <MudSwitch @bind-Value="currentStore.Enabled"
+                               Label="Store Enabled"
+                               Color="Color.Primary" />
+                </MudItem>
+
+                <!-- SoftOne Go Settings -->
+                <MudItem xs="12" Class="mt-4">
+                    <MudText Typo="Typo.h6" Class="mb-3">SoftOne Go Settings</MudText>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudTextField @bind-Value="currentStore.SoftOneGo.BaseUrl"
+                                  Label="Base URL"
+                                  Variant="Variant.Outlined"
+                                  HelperText="SoftOne Go API base URL" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudTextField @bind-Value="currentStore.SoftOneGo.AppId"
+                                  Label="App ID"
+                                  Variant="Variant.Outlined"
+                                  HelperText="Application ID in SoftOne Go" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudTextField @bind-Value="currentStore.SoftOneGo.S1Code"
+                                  Label="S1 Code"
+                                  Variant="Variant.Outlined"
+                                  HelperText="Company code in SoftOne" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudTextField @bind-Value="currentStore.SoftOneGo.Token"
+                                  Label="Token"
+                                  InputType="InputType.Password"
+                                  Variant="Variant.Outlined"
+                                  HelperText="Authentication token" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField @bind-Value="currentStore.SoftOneGo.Filters"
+                                  Label="Filters"
+                                  Variant="Variant.Outlined"
+                                  Lines="2"
+                                  HelperText="Query filters for product data" />
+                </MudItem>
+
+                <!-- ATUM Settings -->
+                <MudItem xs="12" Class="mt-4">
+                    <MudText Typo="Typo.h6" Class="mb-3">ATUM Multi Inventory Settings</MudText>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudNumericField @bind-Value="currentStore.ATUM.LocationId"
+                                     Label="Location ID"
+                                     Variant="Variant.Outlined"
+                                     HelperText="ATUM inventory location ID" />
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudTextField @bind-Value="currentStore.ATUM.LocationName"
+                                  Label="Location Name"
+                                  Variant="Variant.Outlined"
+                                  HelperText="ATUM location identifier" />
+                </MudItem>
+            </MudGrid>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseDialog">Cancel</MudButton>
+        <MudButton Color="Color.Primary"
+                   Variant="Variant.Filled"
+                   OnClick="SaveStore"
+                   Disabled="isSaving">
+            @if (isSaving)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+                <span class="ml-2">Saving...</span>
+            }
+            else
+            {
+                <span>@(isEditMode ? "Update" : "Create")</span>
+            }
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+<!-- Delete Confirmation Dialog -->
+<MudDialog @bind-Visible="isDeleteDialogOpen">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Error" Class="mr-2" />
+            Confirm Deletion
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText>Are you sure you want to delete store "@storeToDelete?.Name"?</MudText>
+        <MudText Color="Color.Warning" Class="mt-2">This action cannot be undone.</MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseDeleteDialog">Cancel</MudButton>
+        <MudButton Color="Color.Error"
+                   Variant="Variant.Filled"
+                   OnClick="ConfirmDelete"
+                   Disabled="isDeleting">
+            @if (isDeleting)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" />
+                <span class="ml-2">Deleting...</span>
+            }
+            else
+            {
+                <span>Delete</span>
+            }
+        </MudButton>
+    </DialogActions>
+</MudDialog>

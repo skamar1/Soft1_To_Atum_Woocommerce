@@ -3,6 +3,11 @@ namespace Soft1_To_Atum.Data.Models;
 public class SyncLog
 {
     public int Id { get; set; }
+
+    // Store Association
+    public int? StoreSettingsId { get; set; }
+    public virtual StoreSettings? StoreSettings { get; set; }
+
     public DateTime StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
     public int TotalProducts { get; set; }

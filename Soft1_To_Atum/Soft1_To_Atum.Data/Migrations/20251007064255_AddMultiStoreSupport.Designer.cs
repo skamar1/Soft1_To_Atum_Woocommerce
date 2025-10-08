@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Soft1_To_Atum.Data;
 
@@ -10,9 +11,11 @@ using Soft1_To_Atum.Data;
 namespace Soft1_To_Atum.Data.Migrations
 {
     [DbContext(typeof(SyncDbContext))]
-    partial class SyncDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251007064255_AddMultiStoreSupport")]
+    partial class AddMultiStoreSupport
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.0");
@@ -172,42 +175,6 @@ namespace Soft1_To_Atum.Data.Migrations
                             WooCommerceUrl = "",
                             WooCommerceVersion = "wc/v3"
                         });
-                });
-
-            modelBuilder.Entity("Soft1_To_Atum.Data.Models.AutoSyncLog", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime?>("CompletedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Details")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ErrorMessage")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("FailedStores")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("StartedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("SuccessfulStores")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("TotalStores")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("AutoSyncLogs");
                 });
 
             modelBuilder.Entity("Soft1_To_Atum.Data.Models.Product", b =>
