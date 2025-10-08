@@ -62,11 +62,11 @@
                                     }
                                     else
                                     {
-                                        <MudChip Size="Size.Small" Color="Color.Info">Εκτελείται...</MudChip>
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Info">Εκτελείται...</MudChip>
                                     }
                                 </MudTd>
                                 <MudTd DataLabel="Κατάσταση">
-                                    <MudChip Size="Size.Small" Color="@GetAutoSyncStatusColor(context.Status)">
+                                    <MudChip T="string" Size="Size.Small" Color="@GetAutoSyncStatusColor(context.Status)">
                                         @GetAutoSyncStatusText(context.Status)
                                     </MudChip>
                                 </MudTd>
@@ -152,11 +152,11 @@
                                     }
                                     else
                                     {
-                                        <MudChip Size="Size.Small" Color="Color.Info">Εκτελείται...</MudChip>
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Info">Εκτελείται...</MudChip>
                                     }
                                 </MudTd>
                                 <MudTd DataLabel="Κατάσταση">
-                                    <MudChip Size="Size.Small" Color="@GetManualSyncStatusColor(context.Status)">
+                                    <MudChip T="string" Size="Size.Small" Color="@GetManualSyncStatusColor(context.Status)">
                                         @context.Status
                                     </MudChip>
                                 </MudTd>
