@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using Soft1_To_Atum.ApiService.Extensions;
+using Soft1_To_Atum.ApiService.Services;
 using Soft1_To_Atum.Data;
 using Soft1_To_Atum.Data.Models;
 using Soft1_To_Atum.Data.Services;
@@ -29,6 +30,9 @@ builder.Services.AddScoped<EmailService>();
 builder.Services.AddScoped<ProductMatchingService>();
 builder.Services.AddScoped<IWooCommerceAtumClient, WooCommerceAtumClient>();
 builder.Services.AddHttpClient();
+
+// Add Auto-Sync Background Service
+builder.Services.AddHostedService<AutoSyncBackgroundService>();
 
 // Configure specific HttpClient for WooCommerce with very extended timeout
 builder.Services.AddHttpClient<WooCommerceApiService>(client =>
