@@ -1,0 +1,184 @@
+@page "/logs"
+@using Soft1_To_Atum.Blazor.Services
+@using Soft1_To_Atum.Data.Models
+@rendermode InteractiveServer
+
+<PageTitle>Sync Logs - History</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-4">
+    <MudText Typo="Typo.h3" GutterBottom="true">
+        <MudIcon Icon="Icons.Material.Filled.History" Class="mr-3" />
+        Ιστορικό Συγχρονισμών (Sync Logs)
+    </MudText>
+
+    <MudTabs Elevation="2" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-6">
+        <!-- Auto-Sync Logs Tab -->
+        <MudTabPanel Text="Αυτόματος Συγχρονισμός" Icon="@Icons.Material.Filled.Schedule">
+            <MudCard>
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">
+                            <MudIcon Icon="Icons.Material.Filled.Schedule" Class="mr-2" />
+                            Ιστορικό Αυτόματου Συγχρονισμού
+                        </MudText>
+                    </CardHeaderContent>
+                    <CardHeaderActions>
+                        <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                                      Color="Color.Primary"
+                                      OnClick="@LoadAutoSyncLogs"
+                                      Title="Ανανέωση" />
+                    </CardHeaderActions>
+                </MudCardHeader>
+                <MudCardContent>
+                    @if (isLoadingAutoSync)
+                    {
+                        <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="my-4" />
+                    }
+                    else if (!autoSyncLogs.Any())
+                    {
+                        <MudAlert Severity="Severity.Info">
+                            Δεν υπάρχει ακόμα ιστορικό αυτόματου συγχρονισμού.
+                        </MudAlert>
+                    }
+                    else
+                    {
+                        <MudTable Items="@autoSyncLogs" Hover="true" Breakpoint="Breakpoint.Sm" Dense="true">
+                            <HeaderContent>
+                                <MudTh>Ημ/νία Έναρξης</MudTh>
+                                <MudTh>Ημ/νία Λήξης</MudTh>
+                                <MudTh>Κατάσταση</MudTh>
+                                <MudTh>Καταστήματα</MudTh>
+                                <MudTh>Επιτυχή</MudTh>
+                                <MudTh>Αποτυχία</MudTh>
+                                <MudTh>Διάρκεια</MudTh>
+                                <MudTh>Λεπτομέρειες</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd DataLabel="Ημ/νία Έναρξης">@context.StartedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")</MudTd>
+                                <MudTd DataLabel="Ημ/νία Λήξης">
+                                    @if (context.CompletedAt.HasValue)
+                                    {
+                                        @context.CompletedAt.Value.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")
+                                    }
+                                    else
+                                    {
+                                        <MudChip Size="Size.Small" Color="Color.Info">Εκτελείται...</MudChip>
+                                    }
+                                </MudTd>
+                                <MudTd DataLabel="Κατάσταση">
+                                    <MudChip Size="Size.Small" Color="@GetAutoSyncStatusColor(context.Status)">
+                                        @GetAutoSyncStatusText(context.Status)
+                                    </MudChip>
+                                </MudTd>
+                                <MudTd DataLabel="Καταστήματα">@context.TotalStores</MudTd>
+                                <MudTd DataLabel="Επιτυχή">
+                                    <MudText Color="Color.Success">@context.SuccessfulStores</MudText>
+                                </MudTd>
+                                <MudTd DataLabel="Αποτυχία">
+                                    <MudText Color="Color.Error">@context.FailedStores</MudText>
+                                </MudTd>
+                                <MudTd DataLabel="Διάρκεια">@GetAutoSyncDuration(context)</MudTd>
+                                <MudTd DataLabel="Λεπτομέρειες">
+                                    @if (!string.IsNullOrEmpty(context.Details))
+                                    {
+                                        <MudIconButton Icon="@Icons.Material.Filled.Info"
+                                                      Size="Size.Small"
+                                                      Color="Color.Info"
+                                                      OnClick="@(() => ShowAutoSyncDetails(context))" />
+                                    }
+                                    @if (!string.IsNullOrEmpty(context.ErrorMessage))
+                                    {
+                                        <MudIconButton Icon="@Icons.Material.Filled.Error"
+                                                      Size="Size.Small"
+                                                      Color="Color.Error"
+                                                      OnClick="@(() => ShowErrorMessage(context.ErrorMessage))" />
+                                    }
+                                </MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    }
+                </MudCardContent>
+            </MudCard>
+        </MudTabPanel>
+
+        <!-- Manual Sync Logs Tab -->
+        <MudTabPanel Text="Χειροκίνητος Συγχρονισμός" Icon="@Icons.Material.Filled.TouchApp">
+            <MudCard>
+                <MudCardHeader>
+                    <CardHeaderContent>
+                        <MudText Typo="Typo.h6">
+                            <MudIcon Icon="Icons.Material.Filled.TouchApp" Class="mr-2" />
+                            Ιστορικό Χειροκίνητου Συγχρονισμού
+                        </MudText>
+                    </CardHeaderContent>
+                    <CardHeaderActions>
+                        <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                                      Color="Color.Primary"
+                                      OnClick="@LoadManualSyncLogs"
+                                      Title="Ανανέωση" />
+                    </CardHeaderActions>
+                </MudCardHeader>
+                <MudCardContent>
+                    @if (isLoadingManual)
+                    {
+                        <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="my-4" />
+                    }
+                    else if (!manualSyncLogs.Any())
+                    {
+                        <MudAlert Severity="Severity.Info">
+                            Δεν υπάρχει ακόμα ιστορικό χειροκίνητου συγχρονισμού.
+                        </MudAlert>
+                    }
+                    else
+                    {
+                        <MudTable Items="@manualSyncLogs" Hover="true" Breakpoint="Breakpoint.Sm" Dense="true">
+                            <HeaderContent>
+                                <MudTh>Ημ/νία Έναρξης</MudTh>
+                                <MudTh>Ημ/νία Λήξης</MudTh>
+                                <MudTh>Κατάσταση</MudTh>
+                                <MudTh>Σύνολο</MudTh>
+                                <MudTh>Δημιουργήθηκαν</MudTh>
+                                <MudTh>Ενημερώθηκαν</MudTh>
+                                <MudTh>Παραλείφθηκαν</MudTh>
+                                <MudTh>Σφάλματα</MudTh>
+                                <MudTh>Διάρκεια</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd DataLabel="Ημ/νία Έναρξης">@context.StartedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")</MudTd>
+                                <MudTd DataLabel="Ημ/νία Λήξης">
+                                    @if (context.CompletedAt.HasValue)
+                                    {
+                                        @context.CompletedAt.Value.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")
+                                    }
+                                    else
+                                    {
+                                        <MudChip Size="Size.Small" Color="Color.Info">Εκτελείται...</MudChip>
+                                    }
+                                </MudTd>
+                                <MudTd DataLabel="Κατάσταση">
+                                    <MudChip Size="Size.Small" Color="@GetManualSyncStatusColor(context.Status)">
+                                        @context.Status
+                                    </MudChip>
+                                </MudTd>
+                                <MudTd DataLabel="Σύνολο">@context.TotalProducts</MudTd>
+                                <MudTd DataLabel="Δημιουργήθηκαν">
+                                    <MudText Color="Color.Success">@context.CreatedProducts</MudText>
+                                </MudTd>
+                                <MudTd DataLabel="Ενημερώθηκαν">
+                                    <MudText Color="Color.Info">@context.UpdatedProducts</MudText>
+                                </MudTd>
+                                <MudTd DataLabel="Παραλείφθηκαν">
+                                    <MudText Color="Color.Warning">@context.SkippedProducts</MudText>
+                                </MudTd>
+                                <MudTd DataLabel="Σφάλματα">
+                                    <MudText Color="Color.Error">@context.ErrorCount</MudText>
+                                </MudTd>
+                                <MudTd DataLabel="Διάρκεια">@GetManualSyncDuration(context)</MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    }
+                </MudCardContent>
+            </MudCard>
+        </MudTabPanel>
+    </MudTabs>
+</MudContainer>

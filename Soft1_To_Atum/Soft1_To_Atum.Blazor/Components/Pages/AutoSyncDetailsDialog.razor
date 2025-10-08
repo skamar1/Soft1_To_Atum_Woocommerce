@@ -1,0 +1,118 @@
+@using Soft1_To_Atum.Data.Models
+
+<MudDialog>
+    <DialogContent>
+        <MudGrid>
+            <MudItem xs="12" sm="6">
+                <MudText Typo="Typo.body2" Color="Color.Secondary">Ημ/νία Έναρξης:</MudText>
+                <MudText Typo="Typo.body1">@LogStartedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")</MudText>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudText Typo="Typo.body2" Color="Color.Secondary">Ημ/νία Λήξης:</MudText>
+                <MudText Typo="Typo.body1">
+                    @if (LogCompletedAt.HasValue)
+                    {
+                        @LogCompletedAt.Value.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")
+                    }
+                    else
+                    {
+                        <span>Εκτελείται...</span>
+                    }
+                </MudText>
+            </MudItem>
+        </MudGrid>
+
+        <MudDivider Class="my-4" />
+
+        <MudText Typo="Typo.h6" Class="mb-3">Λεπτομέρειες ανά Κατάστημα</MudText>
+
+        <MudSimpleTable Dense="true" Hover="true" Bordered="true" Striped="true">
+            <thead>
+                <tr>
+                    <th>Κατάστημα</th>
+                    <th>SoftOne Sync</th>
+                    <th>ATUM Sync</th>
+                    <th>Full Sync</th>
+                    <th>Κατάσταση</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var detail in StoreDetails)
+                {
+                    <tr>
+                        <td>
+                            <MudText Typo="Typo.body2"><strong>@detail.StoreName</strong></MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">ID: @detail.StoreId</MudText>
+                        </td>
+                        <td>
+                            <MudChip Size="Size.Small" Color="@GetSyncStepColor(detail.SoftOneSync)">
+                                @detail.SoftOneSync
+                            </MudChip>
+                        </td>
+                        <td>
+                            <MudChip Size="Size.Small" Color="@GetSyncStepColor(detail.AtumSync)">
+                                @detail.AtumSync
+                            </MudChip>
+                        </td>
+                        <td>
+                            <MudChip Size="Size.Small" Color="@GetSyncStepColor(detail.FullSync)">
+                                @detail.FullSync
+                            </MudChip>
+                        </td>
+                        <td>
+                            <MudChip Size="Size.Small" Color="@GetSyncStepColor(detail.Status)">
+                                @detail.Status
+                            </MudChip>
+                            @if (!string.IsNullOrEmpty(detail.Error))
+                            {
+                                <br />
+                                <MudText Typo="Typo.caption" Color="Color.Error">@detail.Error</MudText>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close" Color="Color.Primary">Κλείσιμο</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private MudDialogInstance MudDialog { get; set; } = null!;
+
+    [Parameter]
+    public List<StoreDetailViewModel> StoreDetails { get; set; } = new();
+
+    [Parameter]
+    public DateTime LogStartedAt { get; set; }
+
+    [Parameter]
+    public DateTime? LogCompletedAt { get; set; }
+
+    private void Close() => MudDialog.Close();
+
+    private static Color GetSyncStepColor(string status)
+    {
+        return status.ToLower() switch
+        {
+            "success" => Color.Success,
+            "failed" => Color.Error,
+            "partial" => Color.Warning,
+            _ => Color.Default
+        };
+    }
+
+    public class StoreDetailViewModel
+    {
+        public string StoreName { get; set; } = "";
+        public int StoreId { get; set; }
+        public string SoftOneSync { get; set; } = "";
+        public string AtumSync { get; set; } = "";
+        public string FullSync { get; set; } = "";
+        public string Status { get; set; } = "";
+        public string? Error { get; set; }
+    }
+}
