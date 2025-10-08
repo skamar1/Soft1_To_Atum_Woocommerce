@@ -1,5 +1,4 @@
 @using Soft1_To_Atum.Data.Models
-@using MudBlazor
 
 <MudDialog>
     <DialogContent>
@@ -80,9 +79,11 @@
     </DialogActions>
 </MudDialog>
 
+@inject IDialogService DialogService
+
 @code {
     [CascadingParameter]
-    private MudDialogInstance MudDialog { get; set; } = null!;
+    public IDialogReference? DialogReference { get; set; }
 
     [Parameter]
     public List<StoreDetailViewModel> StoreDetails { get; set; } = new();
@@ -93,7 +94,7 @@
     [Parameter]
     public DateTime? LogCompletedAt { get; set; }
 
-    private void Close() => MudDialog.Close();
+    private void Close() => DialogReference?.Close();
 
     private static Color GetSyncStepColor(string status)
     {
