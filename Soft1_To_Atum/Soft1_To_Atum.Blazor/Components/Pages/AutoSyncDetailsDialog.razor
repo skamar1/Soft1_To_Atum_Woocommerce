@@ -1,4 +1,5 @@
 @using Soft1_To_Atum.Data.Models
+@inject IDialogService DialogService
 
 <MudDialog>
     <DialogContent>
@@ -75,16 +76,11 @@
         </MudSimpleTable>
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="Close" Color="Color.Primary">Κλείσιμο</MudButton>
+        <MudButton OnClick="Submit" Color="Color.Primary">Κλείσιμο</MudButton>
     </DialogActions>
 </MudDialog>
 
-@inject IDialogService DialogService
-
 @code {
-    [CascadingParameter]
-    public IDialogReference? DialogReference { get; set; }
-
     [Parameter]
     public List<StoreDetailViewModel> StoreDetails { get; set; } = new();
 
@@ -94,7 +90,16 @@
     [Parameter]
     public DateTime? LogCompletedAt { get; set; }
 
-    private void Close() => DialogReference?.Close();
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    private async Task Submit()
+    {
+        if (OnClose.HasDelegate)
+        {
+            await OnClose.InvokeAsync();
+        }
+    }
 
     private static Color GetSyncStepColor(string status)
     {

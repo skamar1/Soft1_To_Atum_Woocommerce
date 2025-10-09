@@ -153,11 +153,11 @@ public partial class Logs : ComponentBase
                 return;
             }
 
-            var storeDetails = new List<StoreDetailViewModel>();
+            var storeDetails = new List<AutoSyncDetailsDialog.StoreDetailViewModel>();
             foreach (var kvp in dict)
             {
                 var detail = kvp.Value;
-                storeDetails.Add(new StoreDetailViewModel
+                storeDetails.Add(new AutoSyncDetailsDialog.StoreDetailViewModel
                 {
                     StoreName = detail.TryGetProperty("storeName", out var storeName) ? storeName.GetString() ?? "" : "",
                     StoreId = detail.TryGetProperty("storeId", out var storeId) ? storeId.GetInt32() : 0,
@@ -169,21 +169,23 @@ public partial class Logs : ComponentBase
                 });
             }
 
-            var parameters = new DialogParameters
-            {
-                ["StoreDetails"] = storeDetails,
-                ["LogStartedAt"] = log.StartedAt,
-                ["LogCompletedAt"] = log.CompletedAt
-            };
-
-            var options = new DialogOptions
-            {
-                MaxWidth = MaxWidth.Large,
-                FullWidth = true,
-                CloseButton = true
-            };
-
-            await DialogService.ShowAsync<AutoSyncDetailsDialog>("Λεπτομέρειες Αυτόματου Συγχρονισμού", parameters, options);
+            IDialogReference? dialogReference = null;
+            dialogReference = await DialogService.ShowAsync<AutoSyncDetailsDialog>(
+                "Λεπτομέρειες Αυτόματου Συγχρονισμού",
+                new DialogParameters
+                {
+                    { nameof(AutoSyncDetailsDialog.StoreDetails), storeDetails },
+                    { nameof(AutoSyncDetailsDialog.LogStartedAt), log.StartedAt },
+                    { nameof(AutoSyncDetailsDialog.LogCompletedAt), log.CompletedAt },
+                    { nameof(AutoSyncDetailsDialog.OnClose), EventCallback.Factory.Create(this, () => dialogReference?.Close()) }
+                },
+                new DialogOptions
+                {
+                    MaxWidth = MaxWidth.Large,
+                    FullWidth = true,
+                    CloseButton = true,
+                    CloseOnEscapeKey = true
+                });
         }
         catch (Exception ex)
         {
@@ -202,16 +204,5 @@ public partial class Logs : ComponentBase
         };
 
         await DialogService.ShowMessageBox("Σφάλμα Συγχρονισμού", errorMessage, "OK");
-    }
-
-    private class StoreDetailViewModel
-    {
-        public string StoreName { get; set; } = "";
-        public int StoreId { get; set; }
-        public string SoftOneSync { get; set; } = "";
-        public string AtumSync { get; set; } = "";
-        public string FullSync { get; set; } = "";
-        public string Status { get; set; } = "";
-        public string? Error { get; set; }
     }
 }

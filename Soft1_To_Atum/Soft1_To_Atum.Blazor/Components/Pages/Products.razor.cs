@@ -18,7 +18,7 @@ public partial class Products : ComponentBase
 
     private List<ProductResponse> products = new();
     private List<ProductResponse> filteredProducts = new();
-    private bool loading = true;
+    private bool loading = false;
     private string searchTerm = "";
     private string _filterStatus = "All";
     private string filterStatus

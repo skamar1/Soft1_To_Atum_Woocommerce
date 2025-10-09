@@ -481,6 +481,7 @@ public partial class Home : ComponentBase, IDisposable
         try
         {
             Logger.LogDebug("Refreshing dashboard data");
+            Snackbar.Add("Ανανέωση Dashboard...", Severity.Info);
 
             // Load sync logs, product statistics, and auto-sync logs in parallel
             var syncLogsTask = SyncApi.GetSyncLogsAsync();
@@ -526,11 +527,12 @@ public partial class Home : ComponentBase, IDisposable
             }
 
             StateHasChanged();
+            Snackbar.Add("Το Dashboard ανανεώθηκε επιτυχώς!", Severity.Success);
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error refreshing dashboard: {Message}", ex.Message);
-            Snackbar.Add("Failed to refresh dashboard data", Severity.Warning);
+            Snackbar.Add("Αποτυχία ανανέωσης Dashboard", Severity.Error);
         }
     }
 
