@@ -24,6 +24,11 @@ public partial class Settings : ComponentBase
     private bool isExporting = false;
     private string testingService = string.Empty;
 
+    // Windows Service Control
+    private ServiceStatusResponse? serviceStatus;
+    private bool isLoadingServiceStatus = false;
+    private bool isServiceOperationInProgress = false;
+
     protected override void OnInitialized()
     {
         Logger.LogInformation("Settings page OnInitialized called");
@@ -87,6 +92,10 @@ public partial class Settings : ComponentBase
 
                 Logger.LogDebug("Settings loaded successfully");
                 Console.WriteLine("Settings loaded successfully");
+
+                // Also load Windows Service status
+                await LoadServiceStatus();
+
                 return; // Success, exit the retry loop
             }
             catch (HttpRequestException ex) when (retry < maxRetries - 1)
@@ -417,6 +426,89 @@ public partial class Settings : ComponentBase
             isExporting = false;
             StateHasChanged();
             Logger.LogInformation("=== EXPORT SETTINGS END ===");
+        }
+    }
+
+    // Windows Service Control Methods
+    private async Task LoadServiceStatus()
+    {
+        isLoadingServiceStatus = true;
+        try
+        {
+            serviceStatus = await SyncApi.GetServiceStatusAsync();
+            Logger.LogInformation("Service status loaded: {Status}", serviceStatus?.Status);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading service status");
+            Snackbar.Add($"Σφάλμα φόρτωσης κατάστασης service: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            isLoadingServiceStatus = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task StartService()
+    {
+        isServiceOperationInProgress = true;
+        try
+        {
+            Logger.LogInformation("Starting Windows Service");
+            var result = await SyncApi.StartServiceAsync();
+
+            if (result?.Success == true)
+            {
+                Snackbar.Add("Το Windows Service ξεκίνησε επιτυχώς", Severity.Success);
+                await Task.Delay(2000); // Wait for service to start
+                await LoadServiceStatus();
+            }
+            else
+            {
+                Snackbar.Add($"Αποτυχία εκκίνησης service: {result?.Message}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error starting service");
+            Snackbar.Add($"Σφάλμα εκκίνησης service: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            isServiceOperationInProgress = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task StopService()
+    {
+        isServiceOperationInProgress = true;
+        try
+        {
+            Logger.LogInformation("Stopping Windows Service");
+            var result = await SyncApi.StopServiceAsync();
+
+            if (result?.Success == true)
+            {
+                Snackbar.Add("Το Windows Service σταμάτησε επιτυχώς", Severity.Success);
+                await Task.Delay(2000); // Wait for service to stop
+                await LoadServiceStatus();
+            }
+            else
+            {
+                Snackbar.Add($"Αποτυχία διακοπής service: {result?.Message}", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error stopping service");
+            Snackbar.Add($"Σφάλμα διακοπής service: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            isServiceOperationInProgress = false;
+            StateHasChanged();
         }
     }
 }

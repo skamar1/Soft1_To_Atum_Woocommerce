@@ -29,6 +29,7 @@ builder.Services.AddScoped<WooCommerceApiService>();
 builder.Services.AddScoped<EmailService>();
 builder.Services.AddScoped<ProductMatchingService>();
 builder.Services.AddScoped<IWooCommerceAtumClient, WooCommerceAtumClient>();
+builder.Services.AddScoped<WindowsServiceController>();
 builder.Services.AddHttpClient();
 
 // Add Auto-Sync Background Service
@@ -1588,6 +1589,62 @@ productsGroup.MapDelete("/all", async (SyncDbContext db, ILogger<Program> logger
 .WithName("DeleteAllProducts")
 .WithSummary("Delete all products from database")
 .WithDescription("⚠️ DANGER: This will permanently delete ALL products from the database. Use only for testing!");
+
+// Windows Service Control Endpoints
+var serviceGroup = app.MapGroup("/api/service")
+    .WithTags("Windows Service Control");
+
+serviceGroup.MapGet("/status", async (
+    WindowsServiceController serviceController,
+    ILogger<Program> logger) =>
+{
+    logger.LogInformation("Getting Windows Service status");
+    var status = await serviceController.GetServiceStatusAsync();
+    return Results.Ok(status);
+})
+.WithName("GetServiceStatus")
+.WithSummary("Get Windows Service status")
+.WithDescription("Returns the current status of the Soft1ToAtumSyncService Windows Service");
+
+serviceGroup.MapPost("/start", async (
+    WindowsServiceController serviceController,
+    ILogger<Program> logger) =>
+{
+    logger.LogInformation("Starting Windows Service");
+    var result = await serviceController.StartServiceAsync();
+
+    if (result.Success)
+    {
+        return Results.Ok(result);
+    }
+    else
+    {
+        return Results.Problem(result.Message);
+    }
+})
+.WithName("StartService")
+.WithSummary("Start Windows Service")
+.WithDescription("Starts the Soft1ToAtumSyncService Windows Service");
+
+serviceGroup.MapPost("/stop", async (
+    WindowsServiceController serviceController,
+    ILogger<Program> logger) =>
+{
+    logger.LogInformation("Stopping Windows Service");
+    var result = await serviceController.StopServiceAsync();
+
+    if (result.Success)
+    {
+        return Results.Ok(result);
+    }
+    else
+    {
+        return Results.Problem(result.Message);
+    }
+})
+.WithName("StopService")
+.WithSummary("Stop Windows Service")
+.WithDescription("Stops the Soft1ToAtumSyncService Windows Service");
 
 app.MapDefaultEndpoints();
 

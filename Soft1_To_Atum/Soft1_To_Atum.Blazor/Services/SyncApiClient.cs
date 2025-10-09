@@ -873,4 +873,93 @@ public class SyncApiClient
             throw new Exception($"Unexpected error during full sync: {ex.Message}", ex);
         }
     }
+
+    // Windows Service Control Methods
+    public async Task<ServiceStatusResponse?> GetServiceStatusAsync()
+    {
+        try
+        {
+            _logger.LogDebug("Getting Windows Service status from API");
+            var response = await _httpClient.GetAsync("/api/service/status");
+            response.EnsureSuccessStatusCode();
+
+            var content = await response.Content.ReadAsStringAsync();
+            return JsonSerializer.Deserialize<ServiceStatusResponse>(content, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting service status");
+            return new ServiceStatusResponse
+            {
+                IsRunning = false,
+                Status = "Error",
+                Message = $"Failed to get status: {ex.Message}"
+            };
+        }
+    }
+
+    public async Task<ServiceOperationResponse?> StartServiceAsync()
+    {
+        try
+        {
+            _logger.LogInformation("Starting Windows Service via API");
+            var response = await _httpClient.PostAsync("/api/service/start", null);
+
+            var content = await response.Content.ReadAsStringAsync();
+            return JsonSerializer.Deserialize<ServiceOperationResponse>(content, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error starting service");
+            return new ServiceOperationResponse
+            {
+                Success = false,
+                Message = $"Failed to start service: {ex.Message}"
+            };
+        }
+    }
+
+    public async Task<ServiceOperationResponse?> StopServiceAsync()
+    {
+        try
+        {
+            _logger.LogInformation("Stopping Windows Service via API");
+            var response = await _httpClient.PostAsync("/api/service/stop", null);
+
+            var content = await response.Content.ReadAsStringAsync();
+            return JsonSerializer.Deserialize<ServiceOperationResponse>(content, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error stopping service");
+            return new ServiceOperationResponse
+            {
+                Success = false,
+                Message = $"Failed to stop service: {ex.Message}"
+            };
+        }
+    }
+}
+
+// Response models for Windows Service control
+public class ServiceStatusResponse
+{
+    public bool IsRunning { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+}
+
+public class ServiceOperationResponse
+{
+    public bool Success { get; set; }
+    public string Message { get; set; } = string.Empty;
 }
