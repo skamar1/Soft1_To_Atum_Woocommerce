@@ -1,443 +1,325 @@
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 using Soft1_To_Atum.Data;
 using Soft1_To_Atum.Data.Models;
 using Soft1_To_Atum.Data.Services;
+using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace Soft1_To_Atum.WindowsService;
 
 public class Worker : BackgroundService
 {
-    private readonly ILogger<Worker> _logger;
     private readonly IServiceProvider _serviceProvider;
-    private readonly SyncServiceConfiguration _config;
-    private Timer? _syncTimer;
+    private readonly ILogger<Worker> _logger;
+    private readonly IHttpClientFactory _httpClientFactory;
 
     public Worker(
-        ILogger<Worker> logger,
         IServiceProvider serviceProvider,
-        IOptions<SyncServiceConfiguration> config)
+        ILogger<Worker> logger,
+        IHttpClientFactory httpClientFactory)
     {
-        _logger = logger;
         _serviceProvider = serviceProvider;
-        _config = config.Value;
+        _logger = logger;
+        _httpClientFactory = httpClientFactory;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("Soft1ToAtumSyncService started at: {Time}", DateTimeOffset.Now);
-        _logger.LogInformation("Sync interval: {Interval} minutes", _config.SyncSettings.IntervalMinutes);
-        _logger.LogInformation("Auto-sync enabled: {Enabled}", _config.SyncSettings.EnableAutoSync);
+        _logger.LogInformation("Soft1ToAtumSyncService (Windows Service) starting at: {Time}", DateTimeOffset.Now);
 
-        if (!_config.SyncSettings.EnableAutoSync)
+        // Wait a bit on startup to let the application fully initialize
+        await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+
+        while (!stoppingToken.IsCancellationRequested)
         {
-            _logger.LogInformation("Auto-sync is disabled. Service will not perform automatic synchronizations.");
-            await Task.Delay(Timeout.Infinite, stoppingToken);
-            return;
-        }
-
-        // Initial sync on startup (wait 10 seconds first)
-        await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
-        await PerformSync();
-
-        // Setup periodic sync
-        var interval = TimeSpan.FromMinutes(_config.SyncSettings.IntervalMinutes);
-        _syncTimer = new Timer(
-            async _ => await PerformSync(),
-            null,
-            interval,
-            interval);
-
-        // Keep service running
-        await Task.Delay(Timeout.Infinite, stoppingToken);
-    }
-
-    private async Task PerformSync()
-    {
-        using var scope = _serviceProvider.CreateScope();
-        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Worker>>();
-
-        try
-        {
-            logger.LogInformation("=== Starting Sync Cycle at {Time} ===", DateTimeOffset.Now);
-
-            var db = scope.ServiceProvider.GetRequiredService<SyncDbContext>();
-            var softOneService = scope.ServiceProvider.GetRequiredService<SoftOneApiService>();
-            var wooCommerceService = scope.ServiceProvider.GetRequiredService<WooCommerceApiService>();
-            var atumService = scope.ServiceProvider.GetRequiredService<AtumApiService>();
-
-            // Step 1: Read from SoftOne
-            logger.LogInformation("Step 1: Reading products from SoftOne...");
-            var softOneProducts = await softOneService.GetProductsAsync(
-                _config.SoftOne.BaseUrl,
-                _config.SoftOne.AppId,
-                _config.SoftOne.Token,
-                _config.SoftOne.S1Code,
-                "", // filters - empty for now
-                default);
-
-            logger.LogInformation("Retrieved {Count} products from SoftOne", softOneProducts.Count);
-
-            // Step 2: Save to database
-            logger.LogInformation("Step 2: Saving to database...");
-            int savedCount = 0;
-            foreach (var sp in softOneProducts)
+            try
             {
-                var existing = await db.Products.FirstOrDefaultAsync(p => p.Sku == sp.Code);
-                if (existing != null)
+                using var scope = _serviceProvider.CreateScope();
+                var settingsService = scope.ServiceProvider.GetRequiredService<SettingsService>();
+
+                var settings = await settingsService.GetAppSettingsAsync();
+
+                if (settings.SyncAutoSync)
                 {
-                    existing.Quantity = sp.StockQuantity ?? 0;
-                    existing.Price = sp.RetailPrice ?? 0;
-                    existing.UpdatedAt = DateTime.UtcNow;
-                }
-                else
-                {
-                    db.Products.Add(new Product
+                    _logger.LogInformation("Auto-Sync is enabled. Interval: {Interval} minutes", settings.SyncIntervalMinutes);
+
+                    // Run sync immediately on startup if enabled
+                    await RunAutoSyncAsync(stoppingToken);
+
+                    // Then run on schedule
+                    var intervalMinutes = settings.SyncIntervalMinutes > 0 ? settings.SyncIntervalMinutes : 15;
+                    var interval = TimeSpan.FromMinutes(intervalMinutes);
+
+                    while (!stoppingToken.IsCancellationRequested)
                     {
-                        SoftOneId = sp.Code,
-                        InternalId = sp.InternalId,
-                        Sku = sp.Code,
-                        Name = sp.Name,
-                        Barcode = sp.Barcode,
-                        Quantity = sp.StockQuantity ?? 0,
-                        Price = sp.RetailPrice ?? 0,
-                        CreatedAt = DateTime.UtcNow,
-                        UpdatedAt = DateTime.UtcNow
-                    });
-                }
-                savedCount++;
-            }
-            await db.SaveChangesAsync();
-            logger.LogInformation("Saved {Count} products to database", savedCount);
+                        await Task.Delay(interval, stoppingToken);
 
-            // Step 3: WooCommerce matching/creation (parallel processing)
-            logger.LogInformation("Step 3: WooCommerce matching and creation...");
-            var allProducts = await db.Products.ToListAsync();
-            var productsWithoutWooId = allProducts.Where(p => string.IsNullOrEmpty(p.WooCommerceId)).ToList();
-            logger.LogInformation("Found {Count} products without WooCommerce ID", productsWithoutWooId.Count);
-
-            int matchedCount = 0;
-            int createdCount = 0;
-            int errorCount = 0;
-            var semaphore = new SemaphoreSlim(10, 10);
-            var tasks = new List<Task>();
-
-            foreach (var product in productsWithoutWooId)
-            {
-                if (string.IsNullOrEmpty(product.Sku))
-                {
-                    logger.LogWarning("Product {Name} has no SKU, skipping", product.Name);
-                    errorCount++;
-                    continue;
-                }
-
-                tasks.Add(Task.Run(async () =>
-                {
-                    await semaphore.WaitAsync();
-                    try
-                    {
-                        var wooProduct = await wooCommerceService.GetProductBySkuAsync(
-                            _config.WooCommerce.ConsumerKey,
-                            _config.WooCommerce.ConsumerSecret,
-                            product.Sku,
-                            default);
-
-                        if (wooProduct != null && wooProduct.Id > 0)
+                        // Re-check if auto-sync is still enabled
+                        settings = await settingsService.GetAppSettingsAsync();
+                        if (settings.SyncAutoSync)
                         {
-                            product.WooCommerceId = wooProduct.Id.ToString();
-                            product.UpdatedAt = DateTime.UtcNow;
-                            product.LastSyncStatus = "Matched in WooCommerce";
-                            Interlocked.Increment(ref matchedCount);
-                            logger.LogInformation("Matched product {Name} (SKU: {Sku}) -> WooCommerce ID: {WooId}",
-                                product.Name, product.Sku, wooProduct.Id);
+                            await RunAutoSyncAsync(stoppingToken);
                         }
                         else
                         {
-                            logger.LogInformation("Creating draft product in WooCommerce: {Name} (SKU: {Sku})",
-                                product.Name, product.Sku);
-
-                            var newProduct = await wooCommerceService.CreateProductAsync(
-                                _config.WooCommerce.ConsumerKey,
-                                _config.WooCommerce.ConsumerSecret,
-                                product.Name,
-                                product.Sku,
-                                product.Price,
-                                default);
-
-                            if (newProduct != null && newProduct.Id > 0)
-                            {
-                                product.WooCommerceId = newProduct.Id.ToString();
-                                product.UpdatedAt = DateTime.UtcNow;
-                                product.LastSyncStatus = "Created as draft in WooCommerce";
-                                Interlocked.Increment(ref createdCount);
-                                logger.LogInformation("Created draft product {Name} -> WooCommerce ID: {WooId}",
-                                    product.Name, newProduct.Id);
-                            }
-                            else
-                            {
-                                product.LastSyncStatus = "Error - Failed to create in WooCommerce";
-                                Interlocked.Increment(ref errorCount);
-                                logger.LogWarning("Failed to create product {Name} in WooCommerce", product.Name);
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogError(ex, "Error processing product {Name} (SKU: {Sku})", product.Name, product.Sku);
-                        product.LastSyncStatus = $"Error - {ex.Message}";
-                        Interlocked.Increment(ref errorCount);
-                    }
-                    finally
-                    {
-                        semaphore.Release();
-                    }
-                }));
-            }
-
-            await Task.WhenAll(tasks);
-            await db.SaveChangesAsync();
-            logger.LogInformation("WooCommerce matching complete: {Matched} matched, {Created} created, {Errors} errors",
-                matchedCount, createdCount, errorCount);
-
-            // Step 4: ATUM inventory creation (batch processing)
-            logger.LogInformation("Step 4: ATUM inventory creation...");
-            var productsForAtum = allProducts
-                .Where(p => !string.IsNullOrEmpty(p.WooCommerceId) && string.IsNullOrEmpty(p.AtumId))
-                .ToList();
-
-            logger.LogInformation("Found {Count} products to create in ATUM", productsForAtum.Count);
-
-            int createdInAtum = 0;
-            int atumErrors = 0;
-
-            if (productsForAtum.Any())
-            {
-                const int batchSize = 50;
-                int totalBatches = (int)Math.Ceiling((double)productsForAtum.Count / batchSize);
-
-                for (int batchIndex = 0; batchIndex < totalBatches; batchIndex++)
-                {
-                    var currentBatchProducts = productsForAtum
-                        .Skip(batchIndex * batchSize)
-                        .Take(batchSize)
-                        .ToList();
-
-                    logger.LogInformation("Processing ATUM creation batch {Current}/{Total} ({Count} products)",
-                        batchIndex + 1, totalBatches, currentBatchProducts.Count);
-
-                    var batchRequest = new AtumBatchRequest();
-
-                    foreach (var product in currentBatchProducts)
-                    {
-                        if (!int.TryParse(product.WooCommerceId, out int wooCommerceProductId))
-                        {
-                            logger.LogWarning("Invalid WooCommerce ID for product {Name}: {WooId}", product.Name, product.WooCommerceId);
-                            atumErrors++;
-                            continue;
-                        }
-
-                        var createItem = new AtumBatchCreateItem
-                        {
-                            ProductId = wooCommerceProductId,
-                            Name = _config.ATUM.LocationName ?? "store1_location",
-                            IsMain = false,
-                            Location = new List<int> { _config.ATUM.LocationId },
-                            MetaData = new AtumBatchMetaData
-                            {
-                                Sku = product.Sku ?? "",
-                                ManageStock = true,
-                                StockQuantity = product.Quantity,
-                                Backorders = false,
-                                StockStatus = product.Quantity > 0 ? "instock" : "outofstock",
-                                Barcode = product.Barcode ?? ""
-                            }
-                        };
-
-                        batchRequest.Create.Add(createItem);
-                    }
-
-                    if (batchRequest.Create.Any())
-                    {
-                        try
-                        {
-                            var batchResponse = await atumService.BatchUpdateInventoryAsync(
-                                _config.WooCommerce.ConsumerKey,
-                                _config.WooCommerce.ConsumerSecret,
-                                batchRequest,
-                                default);
-
-                            if (batchResponse.Create != null && batchResponse.Create.Any())
-                            {
-                                foreach (var createdItem in batchResponse.Create)
-                                {
-                                    if (createdItem.Error != null)
-                                    {
-                                        logger.LogError("ATUM creation error for product {ProductId}: {ErrorCode} - {ErrorMessage}",
-                                            createdItem.ProductId, createdItem.Error.Code, createdItem.Error.Message);
-                                        atumErrors++;
-                                        continue;
-                                    }
-
-                                    var product = allProducts.FirstOrDefault(p => p.WooCommerceId == createdItem.ProductId.ToString());
-                                    if (product != null)
-                                    {
-                                        product.AtumId = createdItem.Id.ToString();
-                                        product.AtumQuantity = product.Quantity;
-                                        product.UpdatedAt = DateTime.UtcNow;
-                                        product.LastSyncedAt = DateTime.UtcNow;
-                                        product.LastSyncStatus = "Created in ATUM";
-                                        createdInAtum++;
-                                    }
-                                }
-
-                                await db.SaveChangesAsync();
-                                logger.LogInformation("Batch {Current} completed: {Created} created",
-                                    batchIndex + 1, batchResponse.Create.Count);
-                            }
-                        }
-                        catch (Exception batchEx)
-                        {
-                            logger.LogError(batchEx, "Error processing ATUM batch {BatchNum}: {Message}",
-                                batchIndex + 1, batchEx.Message);
-                            atumErrors += currentBatchProducts.Count;
-                        }
-
-                        if (batchIndex < totalBatches - 1)
-                        {
-                            await Task.Delay(500);
+                            _logger.LogInformation("Auto-Sync has been disabled. Stopping scheduled syncs.");
+                            break;
                         }
                     }
                 }
+                else
+                {
+                    _logger.LogInformation("Auto-Sync is disabled. Waiting for it to be enabled...");
+                    // Check every minute if auto-sync has been enabled
+                    await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // This is expected when the service is stopping
+                _logger.LogInformation("Soft1ToAtumSyncService is stopping due to cancellation.");
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in Auto-Sync main loop");
+                // Wait a bit before retrying
+                await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+            }
+        }
 
-                logger.LogInformation("ATUM creation complete: {Created} created, {Errors} errors",
-                    createdInAtum, atumErrors);
+        _logger.LogInformation("Soft1ToAtumSyncService has stopped.");
+    }
+
+    private async Task RunAutoSyncAsync(CancellationToken cancellationToken)
+    {
+        AutoSyncLog? syncLog = null;
+
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<SyncDbContext>();
+            var storeSettingsService = scope.ServiceProvider.GetRequiredService<StoreSettingsService>();
+
+            _logger.LogInformation("=== Starting Auto-Sync for all enabled stores ===");
+
+            // Get all enabled stores
+            var stores = await storeSettingsService.GetAllStoresAsync();
+            var enabledStores = stores.Where(s => s.StoreEnabled).ToList();
+
+            if (!enabledStores.Any())
+            {
+                _logger.LogWarning("No enabled stores found. Skipping auto-sync.");
+                return;
             }
 
-            // Step 5: ATUM quantity updates (batch processing, skip if quantity unchanged)
-            logger.LogInformation("Step 5: ATUM quantity updates...");
-            var productsForAtumUpdate = allProducts
-                .Where(p => (!string.IsNullOrEmpty(p.SoftOneId) || !string.IsNullOrEmpty(p.InternalId)) &&
-                           !string.IsNullOrEmpty(p.WooCommerceId) &&
-                           !string.IsNullOrEmpty(p.AtumId) &&
-                           p.Quantity != p.AtumQuantity) // Skip if quantity unchanged
-                .ToList();
+            _logger.LogInformation("Found {Count} enabled stores for auto-sync", enabledStores.Count);
 
-            logger.LogInformation("Found {Count} products with quantity changes to update in ATUM", productsForAtumUpdate.Count);
-
-            int updatedInAtum = 0;
-            int atumUpdateErrors = 0;
-            int skippedCount = allProducts.Count(p => !string.IsNullOrEmpty(p.AtumId) && p.Quantity == p.AtumQuantity);
-
-            logger.LogInformation("Skipping {Count} products with unchanged quantities", skippedCount);
-
-            if (productsForAtumUpdate.Any())
+            // Create sync log entry
+            syncLog = new AutoSyncLog
             {
-                const int batchSize = 50;
-                int totalBatches = (int)Math.Ceiling((double)productsForAtumUpdate.Count / batchSize);
+                StartedAt = DateTime.UtcNow,
+                Status = "Running",
+                TotalStores = enabledStores.Count,
+                SuccessfulStores = 0,
+                FailedStores = 0
+            };
+            dbContext.AutoSyncLogs.Add(syncLog);
+            await dbContext.SaveChangesAsync(cancellationToken);
 
-                for (int batchIndex = 0; batchIndex < totalBatches; batchIndex++)
+            var storeResults = new Dictionary<string, object>();
+            int successCount = 0;
+            int failCount = 0;
+
+            foreach (var store in enabledStores)
+            {
+                if (cancellationToken.IsCancellationRequested)
                 {
-                    var currentBatchProducts = productsForAtumUpdate
-                        .Skip(batchIndex * batchSize)
-                        .Take(batchSize)
-                        .ToList();
-
-                    logger.LogInformation("Processing ATUM update batch {Current}/{Total} ({Count} products)",
-                        batchIndex + 1, totalBatches, currentBatchProducts.Count);
-
-                    var batchRequest = new AtumBatchRequest();
-
-                    foreach (var product in currentBatchProducts)
-                    {
-                        if (!int.TryParse(product.AtumId, out int atumInventoryId))
-                        {
-                            logger.LogWarning("Invalid ATUM ID for product {Name}: {AtumId}", product.Name, product.AtumId);
-                            atumUpdateErrors++;
-                            continue;
-                        }
-
-                        var updateItem = new AtumBatchUpdateItem
-                        {
-                            Id = atumInventoryId,
-                            MetaData = new AtumBatchUpdateMetaData
-                            {
-                                StockQuantity = product.Quantity
-                            }
-                        };
-
-                        batchRequest.Update.Add(updateItem);
-                    }
-
-                    if (batchRequest.Update.Any())
-                    {
-                        try
-                        {
-                            var batchResponse = await atumService.BatchUpdateInventoryAsync(
-                                _config.WooCommerce.ConsumerKey,
-                                _config.WooCommerce.ConsumerSecret,
-                                batchRequest,
-                                default);
-
-                            if (batchResponse.Update != null && batchResponse.Update.Any())
-                            {
-                                foreach (var updatedItem in batchResponse.Update)
-                                {
-                                    if (updatedItem.Error != null)
-                                    {
-                                        logger.LogError("ATUM update error for inventory {InventoryId}: {ErrorCode} - {ErrorMessage}",
-                                            updatedItem.Id, updatedItem.Error.Code, updatedItem.Error.Message);
-                                        atumUpdateErrors++;
-                                        continue;
-                                    }
-
-                                    var product = allProducts.FirstOrDefault(p => p.AtumId == updatedItem.Id.ToString());
-                                    if (product != null)
-                                    {
-                                        product.AtumQuantity = product.Quantity;
-                                        product.UpdatedAt = DateTime.UtcNow;
-                                        product.LastSyncedAt = DateTime.UtcNow;
-                                        product.LastSyncStatus = "ATUM: Quantity updated";
-                                        updatedInAtum++;
-                                    }
-                                }
-
-                                await db.SaveChangesAsync();
-                                logger.LogInformation("Batch {Current} completed: {Updated} updated",
-                                    batchIndex + 1, batchResponse.Update.Count);
-                            }
-                        }
-                        catch (Exception batchEx)
-                        {
-                            logger.LogError(batchEx, "Error processing ATUM update batch {BatchNum}: {Message}",
-                                batchIndex + 1, batchEx.Message);
-                            atumUpdateErrors += currentBatchProducts.Count;
-                        }
-
-                        if (batchIndex < totalBatches - 1)
-                        {
-                            await Task.Delay(500);
-                        }
-                    }
+                    _logger.LogWarning("Auto-sync cancelled during store processing");
+                    syncLog.Status = "Cancelled";
+                    syncLog.ErrorMessage = "Sync was cancelled during execution";
+                    break;
                 }
 
-                logger.LogInformation("ATUM update complete: {Updated} updated, {Skipped} skipped (unchanged), {Errors} errors",
-                    updatedInAtum, skippedCount, atumUpdateErrors);
+                _logger.LogInformation("=== Auto-Sync for Store: {StoreName} (ID: {StoreId}) ===", store.StoreName, store.Id);
+
+                var storeResult = new Dictionary<string, object>
+                {
+                    ["storeName"] = store.StoreName,
+                    ["storeId"] = store.Id
+                };
+
+                try
+                {
+                    // Step 1: SoftOne Sync
+                    _logger.LogInformation("Step 1/3: Running SoftOne sync for store {StoreId}", store.Id);
+                    var softOneSuccess = await RunSoftOneSyncForStoreAsync(store.Id, cancellationToken);
+                    storeResult["softOneSync"] = softOneSuccess ? "Success" : "Failed";
+
+                    // Step 2: ATUM Sync
+                    _logger.LogInformation("Step 2/3: Running ATUM sync for store {StoreId}", store.Id);
+                    var atumSuccess = await RunAtumSyncForStoreAsync(store.Id, cancellationToken);
+                    storeResult["atumSync"] = atumSuccess ? "Success" : "Failed";
+
+                    // Step 3: Full Sync (WooCommerce + ATUM)
+                    _logger.LogInformation("Step 3/3: Running Full sync for store {StoreId}", store.Id);
+                    var fullSyncSuccess = await RunFullSyncForStoreAsync(store.Id, cancellationToken);
+                    storeResult["fullSync"] = fullSyncSuccess ? "Success" : "Failed";
+
+                    if (softOneSuccess && atumSuccess && fullSyncSuccess)
+                    {
+                        storeResult["status"] = "Success";
+                        successCount++;
+                        _logger.LogInformation("Auto-sync completed successfully for store {StoreName}", store.StoreName);
+                    }
+                    else
+                    {
+                        storeResult["status"] = "Partial";
+                        failCount++;
+                        _logger.LogWarning("Auto-sync completed with some failures for store {StoreName}", store.StoreName);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    storeResult["status"] = "Failed";
+                    storeResult["error"] = ex.Message;
+                    failCount++;
+                    _logger.LogError(ex, "Error during auto-sync for store {StoreName} (ID: {StoreId})", store.StoreName, store.Id);
+                }
+
+                storeResults[store.Id.ToString()] = storeResult;
+
+                // Small delay between stores to avoid overwhelming the system
+                if (!cancellationToken.IsCancellationRequested)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+                }
             }
 
-            logger.LogInformation("=== Sync Cycle Completed Successfully at {Time} ===", DateTimeOffset.Now);
-            logger.LogInformation("Summary: SoftOne={SoftOne}, WooCommerce Matched={Matched}, WooCommerce Created={Created}, ATUM Created={AtumCreated}, ATUM Updated={AtumUpdated}",
-                softOneProducts.Count, matchedCount, createdCount, createdInAtum, updatedInAtum);
+            // Update sync log with results
+            syncLog.CompletedAt = DateTime.UtcNow;
+            syncLog.Status = syncLog.Status == "Cancelled" ? "Cancelled" : (failCount == 0 ? "Completed" : "Failed");
+            syncLog.SuccessfulStores = successCount;
+            syncLog.FailedStores = failCount;
+            syncLog.Details = JsonSerializer.Serialize(storeResults);
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("=== Auto-Sync completed for all enabled stores ===");
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error during sync cycle: {Message}", ex.Message);
+            _logger.LogError(ex, "Critical error during auto-sync execution");
+
+            if (syncLog != null)
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var dbContext = scope.ServiceProvider.GetRequiredService<SyncDbContext>();
+
+                syncLog.CompletedAt = DateTime.UtcNow;
+                syncLog.Status = "Failed";
+                syncLog.ErrorMessage = ex.Message;
+                dbContext.Update(syncLog);
+                await dbContext.SaveChangesAsync(CancellationToken.None);
+            }
+        }
+    }
+
+    private async Task<bool> RunSoftOneSyncForStoreAsync(int storeId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Call the internal API endpoint
+            var client = _httpClientFactory.CreateClient();
+            client.BaseAddress = new Uri("http://localhost:5465");
+
+            var response = await client.PostAsync($"/api/sync/softone-to-database?storeId={storeId}", null, cancellationToken);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogInformation("SoftOne sync for store {StoreId} completed successfully", storeId);
+                return true;
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogError("SoftOne sync for store {StoreId} failed with status {StatusCode}: {Error}",
+                    storeId, response.StatusCode, error);
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in SoftOne sync for store {StoreId}", storeId);
+            return false;
+        }
+    }
+
+    private async Task<bool> RunAtumSyncForStoreAsync(int storeId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Call the internal API endpoint
+            var client = _httpClientFactory.CreateClient();
+            client.BaseAddress = new Uri("http://localhost:5465");
+
+            var response = await client.PostAsync($"/api/sync/atum?storeId={storeId}", null, cancellationToken);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogInformation("ATUM sync for store {StoreId} completed successfully", storeId);
+                return true;
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogError("ATUM sync for store {StoreId} failed with status {StatusCode}: {Error}",
+                    storeId, response.StatusCode, error);
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in ATUM sync for store {StoreId}", storeId);
+            return false;
+        }
+    }
+
+    private async Task<bool> RunFullSyncForStoreAsync(int storeId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Call the internal API endpoint
+            var client = _httpClientFactory.CreateClient();
+            client.BaseAddress = new Uri("http://localhost:5465");
+            client.Timeout = TimeSpan.FromMinutes(30); // Full sync can take a long time
+
+            var response = await client.GetAsync($"/api/sync/test-read-products?storeId={storeId}", cancellationToken);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogInformation("Full sync for store {StoreId} completed successfully", storeId);
+                return true;
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogError("Full sync for store {StoreId} failed with status {StatusCode}: {Error}",
+                    storeId, response.StatusCode, error);
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in Full sync for store {StoreId}", storeId);
+            return false;
         }
     }
 
     public override async Task StopAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("Soft1ToAtumSyncService is stopping at: {Time}", DateTimeOffset.Now);
-        _syncTimer?.Dispose();
         await base.StopAsync(stoppingToken);
     }
 }

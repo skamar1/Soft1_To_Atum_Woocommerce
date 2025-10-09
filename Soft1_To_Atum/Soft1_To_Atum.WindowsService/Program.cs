@@ -6,16 +6,6 @@ using Soft1_To_Atum.WindowsService;
 
 var builder = Host.CreateApplicationBuilder(args);
 
-// Load configuration from appsettings.Soft1ToAtum.json if exists
-var configPath = Path.Combine(AppContext.BaseDirectory, "appsettings.Soft1ToAtum.json");
-if (File.Exists(configPath))
-{
-    builder.Configuration.AddJsonFile(configPath, optional: false, reloadOnChange: true);
-}
-
-// Bind configuration
-builder.Services.Configure<SyncServiceConfiguration>(builder.Configuration);
-
 // Configure Windows Service
 builder.Services.AddWindowsService(options =>
 {
@@ -33,17 +23,24 @@ builder.Services.Configure<EventLogSettings>(options =>
 builder.Logging.AddConsole();
 builder.Logging.AddEventLog();
 
-// Add SQLite Database
-var dbPath = Path.Combine(AppContext.BaseDirectory, "sync-service.db");
+// Add SQLite Database - use same database as API Service
+var dbPath = Path.Combine(AppContext.BaseDirectory, "sync.db");
 builder.Services.AddDbContext<SyncDbContext>(options =>
     options.UseSqlite($"Data Source={dbPath}"));
 
-// Add API Services
+// Add Settings Services to read from database
+builder.Services.AddScoped<SettingsService>();
+builder.Services.AddScoped<StoreSettingsService>();
+
+// Add API Services (for backward compatibility, if needed)
 builder.Services.AddScoped<SoftOneApiService>();
 builder.Services.AddScoped<WooCommerceApiService>();
 builder.Services.AddScoped<AtumApiService>();
 builder.Services.AddScoped<ProductMatchingService>();
 builder.Services.AddScoped<EmailService>();
+
+// Add HttpClient for API calls
+builder.Services.AddHttpClient();
 
 // Add HttpClient with long timeout for WooCommerce
 builder.Services.AddHttpClient<WooCommerceApiService>(client =>
